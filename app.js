@@ -679,10 +679,61 @@
     </section>`;
   }
 
-  function openModal(title,sub,body){
-    $('#modal-root').innerHTML=`<div class="modal-backdrop" data-action="close-modal-backdrop"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${title}</h2>${sub?`<p>${sub}</p>`:''}</div><button class="close-btn" data-action="close-modal">${icon('close',18)}</button></div>${body}</div></div>`;
-  }
-  function closeModal(){ $('#modal-root').innerHTML=''; }
+  let modalScrollY = 0;
+let modalScrollLocked = false;
+
+function lockModalScroll(){
+  if(modalScrollLocked) return;
+
+  modalScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  modalScrollLocked = true;
+
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${modalScrollY}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
+}
+
+function unlockModalScroll(){
+  if(!modalScrollLocked) return;
+
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+
+  modalScrollLocked = false;
+
+  window.scrollTo(0, modalScrollY);
+}
+
+function openModal(title,sub,body){
+  lockModalScroll();
+
+  $('#modal-root').innerHTML=`
+    <div class="modal-backdrop" data-action="close-modal-backdrop">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <div>
+            <h2>${title}</h2>
+            ${sub?`<p>${sub}</p>`:''}
+          </div>
+          <button class="close-btn" data-action="close-modal">
+            ${icon('close',18)}
+          </button>
+        </div>
+        ${body}
+      </div>
+    </div>`;
+}
+
+function closeModal(){
+  $('#modal-root').innerHTML='';
+  unlockModalScroll();
+}
+  
   let toastTimer;
   function toast(msg,type=''){ clearTimeout(toastTimer); $('#toast-root').innerHTML=`<div class="toast ${type}">${esc(msg)}</div>`; toastTimer=setTimeout(()=>$('#toast-root').innerHTML='',2800); }
   function confirmModal(title,msg,okText,onAction,onData=''){
