@@ -74,7 +74,7 @@
         {ID_CLIENTE:'CLI-2C44',ID_USUARIO:'USR-A82F',RUTA:'17029',ID_AGENCIA:'AG-01',NOMBRE_NEGOCIO:'Mini Súper La Terminal',CATEGORIA:'Sin congelador',DIRECCION:'Terminal de buses',REFERENCIA:'Local 12',ESTADO:'ACTIVO'},
         {ID_CLIENTE:'CLI-4D80',ID_USUARIO:'USR-A82F',RUTA:'17029',ID_AGENCIA:'AG-01',NOMBRE_NEGOCIO:'Tienda La Bendición',CATEGORIA:'Sin congelador',DIRECCION:'Barrio El Calvario',REFERENCIA:'Portón verde',ESTADO:'ACTIVO'}
       ],
-      periodos:[{ID_PERIODO:'PER-2026-08-17029',ID_USUARIO:'USR-A82F',RUTA:'17029',ID_AGENCIA:'AG-01',AGENCIA:'Guastatoya',MES:8,ANIO:2026,PRESUPUESTO_CONGELADOR:5000,PRESUPUESTO_SIN_CONGELADOR:715,PRESUPUESTO_GENERAL:5715,FECHA_INICIO:'2026-08-01',FECHA_CIERRE:'',ESTADO:'ACTIVO',ORIGEN_MODIFICACION:'SUPERVISOR',MODIFICADO_POR:'SUPERVISOR'}],
+      periodos:[{ID_PERIODO:'PER-2026-08-17029',ID_USUARIO:'USR-A82F',RUTA:'17029',ID_AGENCIA:'AG-01',AGENCIA:'Guastatoya',MES:8,ANIO:2026,PRESUPUESTO_CONGELADOR:5000,PRESUPUESTO_SIN_CONGELADOR:715,PRESUPUESTO_GENERAL:5000,FECHA_INICIO:'2026-08-01',FECHA_CIERRE:'',ESTADO:'ACTIVO',ORIGEN_MODIFICACION:'SUPERVISOR',MODIFICADO_POR:'SUPERVISOR'}],
       dias: days,
       ventas:[
         {ID_VENTA:'VEN-001',ID_PERIODO:'PER-2026-08-17029',ID_USUARIO:'USR-A82F',RUTA:'17029',ID_CLIENTE:'CLI-7D21',CATEGORIA:'Con congelador',MONTO:900,FECHA:'2026-08-04',HORA:'09:15',ESTADO:'ACTIVO'},
@@ -289,12 +289,12 @@
     if(isNew){
       demo.periodos.filter(x=>x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO').forEach(x=>{x.ESTADO='CERRADO';x.FECHA_CIERRE=todayISO();});
       const id=`PER-${p.year}-${String(p.month).padStart(2,'0')}-${u.RUTA}`;
-      const per={ID_PERIODO:id,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_AGENCIA:u.ID_AGENCIA,AGENCIA:u.AGENCIA,MES:Number(p.month),ANIO:Number(p.year),PRESUPUESTO_CONGELADOR:Number(p.budgetCon||0),PRESUPUESTO_SIN_CONGELADOR:Number(p.budgetSin||0),PRESUPUESTO_GENERAL:Number(p.budgetCon||0)+Number(p.budgetSin||0),FECHA_INICIO:`${p.year}-${String(p.month).padStart(2,'0')}-01`,FECHA_CIERRE:'',ESTADO:'ACTIVO',ORIGEN_MODIFICACION:'VENDEDOR',MODIFICADO_POR:`RUTA ${u.RUTA}`};
+      const per={ID_PERIODO:id,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_AGENCIA:u.ID_AGENCIA,AGENCIA:u.AGENCIA,MES:Number(p.month),ANIO:Number(p.year),PRESUPUESTO_CONGELADOR:Number(p.budgetCon||0),PRESUPUESTO_SIN_CONGELADOR:Number(p.budgetSin||0),PRESUPUESTO_GENERAL:Number(p.budgetCon||0),FECHA_INICIO:`${p.year}-${String(p.month).padStart(2,'0')}-01`,FECHA_CIERRE:'',ESTADO:'ACTIVO',ORIGEN_MODIFICACION:'VENDEDOR',MODIFICADO_POR:`RUTA ${u.RUTA}`};
       demo.periodos.push(per); demo.dias=demo.dias.filter(d=>d.ID_PERIODO!==id);
       (p.dates||[]).forEach(date=>demo.dias.push({ID_DIA_VENTA:uid('DV'),ID_PERIODO:id,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_AGENCIA:u.ID_AGENCIA,AGENCIA:u.AGENCIA,FECHA:date,MES:Number(p.month),ANIO:Number(p.year),DIA_PROGRAMADO:'SI',DIA_TRABAJADO:'NO'}));
     } else {
       const per=demo.periodos.find(x=>x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO'); if(!per) throw new Error('No hay período activo');
-      per.PRESUPUESTO_CONGELADOR=Number(p.budgetCon||0); per.PRESUPUESTO_SIN_CONGELADOR=Number(p.budgetSin||0); per.PRESUPUESTO_GENERAL=per.PRESUPUESTO_CONGELADOR+per.PRESUPUESTO_SIN_CONGELADOR; per.ORIGEN_MODIFICACION='VENDEDOR'; per.MODIFICADO_POR=`RUTA ${u.RUTA}`;
+      per.PRESUPUESTO_CONGELADOR=Number(p.budgetCon||0); per.PRESUPUESTO_SIN_CONGELADOR=Number(p.budgetSin||0); per.PRESUPUESTO_GENERAL=per.PRESUPUESTO_CONGELADOR; per.ORIGEN_MODIFICACION='VENDEDOR'; per.MODIFICADO_POR=`RUTA ${u.RUTA}`;
       const selected=new Set(p.dates||[]); demo.dias.filter(d=>d.ID_PERIODO===per.ID_PERIODO).forEach(d=>d.DIA_PROGRAMADO=selected.has(d.FECHA)?'SI':'NO');
       selected.forEach(date=>{ if(!demo.dias.some(d=>d.ID_PERIODO===per.ID_PERIODO&&d.FECHA===date)) demo.dias.push({ID_DIA_VENTA:uid('DV'),ID_PERIODO:per.ID_PERIODO,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_AGENCIA:u.ID_AGENCIA,AGENCIA:u.AGENCIA,FECHA:date,MES:per.MES,ANIO:per.ANIO,DIA_PROGRAMADO:'SI',DIA_TRABAJADO:'NO'}); });
     }
@@ -363,10 +363,6 @@
   function renderShell(){
     $('#app').innerHTML=`
       <div class="app-shell">
-        <header class="topbar">
-          <div class="topbar-title"><h1 id="topbar-name">Sombrela 360</h1><span class="route-chip">Ruta ${esc(state.user.RUTA)}</span></div>
-          <button class="icon-btn" data-action="refresh" aria-label="Actualizar">${icon('refresh',20)}</button>
-        </header>
         <main id="page"></main>
         <nav class="bottom-nav" aria-label="Navegación principal">
           ${navButton('inicio','home','INICIO')}
@@ -382,7 +378,6 @@
   function navigate(view,scroll=true){
     state.view=view;
     $$('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view || (view.startsWith('ventas')&&b.dataset.view==='ventas') || (view.startsWith('mas')&&b.dataset.view==='mas') || (view.startsWith('nc')&&b.dataset.view==='nc')));
-    const topName=$('#topbar-name'); if(topName) topName.textContent=titleForView(view);
     if(view==='inicio') renderDashboard();
     else if(view==='ventas') renderSales();
     else if(view==='ventas-history') renderHistory();
@@ -428,7 +423,10 @@
     $('#page').innerHTML=`<section class="page">
       <div class="page-head">
         <div><h2>Ruta ${esc(state.user.RUTA)}</h2><p>${esc(state.user.AGENCIA||'')} · ${d.period?`${monthName(d.period.MES)} ${d.period.ANIO}`:'Sin período activo'}</p></div>
-        <span class="route-chip">${d.days.worked}/${d.days.programmed} días</span>
+        <div class="page-head-actions">
+          <span class="route-chip">${d.days.worked}/${d.days.programmed} días</span>
+          <button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button>
+        </div>
       </div>
       <article class="card hero-card">
         <div class="hero-top">
@@ -462,7 +460,7 @@
     $('#page').innerHTML=`<section class="page">
       <div class="page-head">
         <div><h2>Registrar venta</h2><p>Selecciona el tipo y luego el cliente.</p></div>
-        <div style="display:flex;gap:4px"><button class="icon-btn" data-action="open-history" title="Historial">${icon('history',20)}</button><button class="icon-btn" data-action="open-create-client" title="Nuevo cliente">${icon('plus',21)}</button></div>
+        <div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="open-history" title="Historial">${icon('history',20)}</button><button class="icon-btn" data-action="open-create-client" title="Nuevo cliente">${icon('plus',21)}</button></div>
       </div>
       <div class="segmented">
         <button class="${state.salesCategory==='Con congelador'?'active':''}" data-action="sales-category" data-category="Con congelador">❄️ Con congelador</button>
@@ -499,12 +497,12 @@
     });
   }
   async function renderHistory(){
-    $('#page').innerHTML=`<section class="page"><div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><button class="icon-btn" data-action="back-sales">${icon('back',21)}</button></div><div class="card"><div class="muted small">Cargando historial...</div></div></section>`;
+    $('#page').innerHTML=`<section class="page"><div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div><div class="card"><div class="muted small">Cargando historial...</div></div></section>`;
     try{
       const items=await api.request('history',{}); state.history=items;
       const months=[...new Set(items.map(x=>String(x.FECHA||'').slice(0,7)).filter(Boolean))].sort().reverse();
       $('#page').innerHTML=`<section class="page">
-        <div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><button class="icon-btn" data-action="back-sales">${icon('back',21)}</button></div>
+        <div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div>
         <div class="search" style="margin-bottom:9px"><span>${icon('search',18)}</span><input id="history-search" value="${esc(state.historySearch)}" placeholder="Buscar cliente..."></div>
         <div class="filter-row">
           <select id="history-type"><option value="TODOS">Todos los tipos</option><option value="VENTA" ${state.historyType==='VENTA'?'selected':''}>Ventas</option><option value="NC" ${state.historyType==='NC'?'selected':''}>Notas de crédito</option></select>
@@ -560,7 +558,10 @@
     $('#page').innerHTML=`<section class="page">
       <div class="page-head">
         <div><h2>${draft.editId?'Editar NC':'Nueva nota de crédito'}</h2><p>Registro de cambios de producto.</p></div>
-        ${draft.editId?`<button class="btn btn-outline btn-sm" data-action="reset-nc">Cancelar edición</button>`:''}
+        <div class="page-head-actions">
+          <button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button>
+          ${draft.editId?`<button class="btn btn-outline btn-sm" data-action="reset-nc">Cancelar edición</button>`:''}
+        </div>
       </div>
       <div class="stepper"><span class="on"></span><span class="${draft.channel?'on':''}"></span><span class="${ready?'on':''}"></span></div>
       <div class="section-title"><h3>1. Selecciona el canal</h3></div>
@@ -601,7 +602,7 @@
 
   function renderMore(){
     $('#page').innerHTML=`<section class="page">
-      <div class="page-head"><div><h2>Más</h2><p>Configuración y datos de tu ruta.</p></div></div>
+      <div class="page-head"><div><h2>Más</h2><p>Configuración y datos de tu ruta.</p></div><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button></div>
       <div class="menu-list">
         ${menuCard('mas-user','user','Usuario','Consulta tu información de cuenta')}
         ${menuCard('mas-budget','wallet','Presupuesto','Presupuesto y días de preventa')}
@@ -612,7 +613,7 @@
     </section>`;
   }
   function menuCard(view,ic,title,sub){ return `<button class="menu-card" data-view="${view}" style="text-align:left"><span class="list-icon">${icon(ic,20)}</span><span class="list-main"><span class="list-title">${title}</span><span class="list-sub">${sub}</span></span><span class="chev">${icon('chevron',18)}</span></button>`; }
-  function backHeader(title,sub){return `<div class="page-head"><div><h2>${title}</h2><p>${sub}</p></div><button class="icon-btn" data-view="mas">${icon('back',21)}</button></div>`;}
+  function backHeader(title,sub){return `<div class="page-head"><div><h2>${title}</h2><p>${sub}</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-view="mas" aria-label="Volver">${icon('back',21)}</button></div></div>`;}
   function renderUser(){
     const u=state.user;
     $('#page').innerHTML=`<section class="page">${backHeader('Usuario','Información obtenida desde Google Sheets.')}
