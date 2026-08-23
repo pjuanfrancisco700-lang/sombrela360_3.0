@@ -420,10 +420,7 @@
       </div>
       <div class="progress ${con?'':'green'}"><span style="width:${clamp(data.percent,0,100)}%"></span></div>
       <div class="indicator-meta"><span>${pct(data.percent)} · Avance vs ${money(data.budget)}</span><span>Faltan ${money(data.missing)}</span></div>
-      <div class="stat-row" style="margin-top:11px">
-        <div class="stat-cell"><div class="stat-label">Presupuesto</div><div class="stat-value">${money(data.budget)}</div></div>
-        <div class="stat-cell"><div class="stat-label">Proyección cierre</div><div class="stat-value">${money(data.projection)}</div></div>
-      </div>
+      
     </article>`;
   }
   function renderDashboard(){
