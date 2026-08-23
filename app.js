@@ -387,7 +387,15 @@
     else if(view==='mas-budget') renderBudget();
     else if(view==='mas-clients') renderClientBase();
     else if(view==='mas-about') renderAbout();
-    if(scroll) window.scrollTo({top:0,behavior:'instant'});
+    const resetScroll = scroll || view === 'inicio';
+
+if(resetScroll){
+  requestAnimationFrame(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  });
+}
   }
   function titleForView(v){
     return ({inicio:'Inicio',ventas:'Ventas','ventas-history':'Historial',nc:'Nota de crédito',mas:'Más','mas-user':'Usuario','mas-budget':'Presupuesto','mas-clients':'Base de clientes','mas-about':'Sombrela 360'})[v]||'Sombrela 360';
@@ -821,10 +829,30 @@ function closeModal(){
     if(a==='confirm-logout'){localStorage.removeItem('s360_session');state.session=null;state.user=null;state.data=null;closeModal();renderLogin();return;}
     if(a==='open-new-period'){openNewPeriod();return;}
     if(a==='toggle-date'){
-      const set=el.dataset.set==='new'?state.newPeriodDates:state.budgetDates, date=el.dataset.date; set.has(date)?set.delete(date):set.add(date);
-      if(el.dataset.set==='new')rerenderNewPeriodCalendar(); else {const p=state.data.period;$('#budget-calendar').innerHTML=calendarHTML(Number(p.ANIO),Number(p.MES),state.budgetDates,'budget');}
-      return;
-    }
+  const set = el.dataset.set === 'new'
+    ? state.newPeriodDates
+    : state.budgetDates;
+
+  const date = el.dataset.date;
+
+  if(set.has(date)){
+    set.delete(date);
+  }else{
+    set.add(date);
+  }
+
+  el.classList.toggle('selected', set.has(date));
+
+  const calendar = el.closest('.calendar');
+  const note = calendar?.querySelector('.calendar-note');
+
+  if(note){
+    note.textContent = `Seleccionados: ${set.size} días de preventa`;
+  }
+
+  el.blur();
+  return;
+}
     if(a==='base-category'){state.clientBaseCategory=el.dataset.category;state.clientBaseSearch='';renderClientBase();return;}
     if(a==='edit-client'){const c=state.data.clients.find(x=>x.ID_CLIENTE===el.dataset.client);if(c)openCreateClient(c);return;}
     if(a==='ask-deactivate-client'){confirmModal('Desactivar cliente','El historial del cliente se conservará. Solo dejará de aparecer como activo.','DESACTIVAR','deactivate-client',`data-client="${esc(el.dataset.client)}"`);return;}
