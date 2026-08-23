@@ -10,7 +10,7 @@
   Contraseña demo: 1234
 */
 window.SOMBRELA_CONFIG = {
-  API_URL: "",
+  API_URL: "https://script.google.com/macros/s/AKfycbxAuCTqlMqV1y_1zM4YpFwhtyRHb5mNzm78HmaeMuijye9jbMitnAIlQqbAma6K4w/exec",
   APP_NAME: "Sombrela 360",
   DEMO_MODE: true,
   REQUEST_TIMEOUT_MS: 18000
