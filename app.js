@@ -42,6 +42,19 @@
   const todayISO = () => new Date().toISOString().slice(0,10);
   const nowTime = () => new Date().toTimeString().slice(0,5);
   const uid = prefix => `${prefix}-${Date.now().toString(36).slice(-5).toUpperCase()}${Math.random().toString(36).slice(2,4).toUpperCase()}`;
+  const saleOperationId = () => {
+    let raw = '';
+    if(window.crypto && typeof window.crypto.randomUUID === 'function'){
+      raw = window.crypto.randomUUID();
+    }else if(window.crypto && typeof window.crypto.getRandomValues === 'function'){
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      raw = [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+    }else{
+      raw = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    }
+    return `VEN-${raw.replace(/[^a-zA-Z0-9]/g,'').toUpperCase()}`;
+  };
   const dateLabel = iso => {
     if(!iso) return '';
     const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);
@@ -121,6 +134,7 @@
     ncDraft:{channel:'',motiveId:'',items:{},catalog:[],editId:null},
     budgetDates:new Set(),
     newPeriodDates:new Set(),
+    appliedSaleIds:new Set(),
   };
 
   const api = {
@@ -231,8 +245,14 @@
         const c=demo.clientes.find(x=>x.ID_CLIENTE===p.clientId&&x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO');
         if(!c) throw new Error('Cliente no válido');
         const amount=Number(p.amount); if(!(amount>0)) throw new Error('Monto no válido');
-        const v={ID_VENTA:uid('VEN'),ID_PERIODO:period.ID_PERIODO,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_CLIENTE:c.ID_CLIENTE,CATEGORIA:c.CATEGORIA,MONTO:amount,FECHA:todayISO(),HORA:nowTime(),ESTADO:'ACTIVO'};
-        demo.ventas.push(v); return {sale:v,dashboard:dashboardFor(u)};
+        const saleId=String(p.saleId||'').trim()||uid('VEN');
+        const existing=demo.ventas.find(x=>x.ID_VENTA===saleId);
+        if(existing){
+          if(String(existing.RUTA)!==String(u.RUTA)) throw new Error('Identificador de venta no válido');
+          return {sale:{...existing},duplicate:true};
+        }
+        const v={ID_VENTA:saleId,ID_PERIODO:period.ID_PERIODO,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ID_CLIENTE:c.ID_CLIENTE,CATEGORIA:c.CATEGORIA,MONTO:amount,FECHA:todayISO(),HORA:nowTime(),ESTADO:'ACTIVO'};
+        demo.ventas.push(v); return {sale:v,duplicate:false};
       }
       case 'updateSale': {
         const u=demoCurrentUser(p); const v=demo.ventas.find(x=>x.ID_VENTA===p.saleId&&x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO');
@@ -426,6 +446,31 @@ if(resetScroll){
       
     </article>`;
   }
+  function updateDashboardMetric(metric,amount,days){
+    if(!metric) return metric;
+    const sold=Number(metric.sold||0)+Number(amount||0);
+    const budget=Number(metric.budget||0);
+    const worked=Number(days?.worked||0);
+    const programmed=Number(days?.programmed||0);
+    return {
+      ...metric,
+      sold,
+      missing:Math.max(budget-sold,0),
+      percent:budget>0?sold/budget*100:0,
+      projection:worked>0?sold/worked*programmed:0
+    };
+  }
+  function applyRegisteredSaleToDashboard(sale){
+    const d=state.data?.dashboard;
+    const saleId=String(sale?.ID_VENTA||'');
+    const amount=Number(sale?.MONTO||0);
+    if(!d||!saleId||!(amount>0)||state.appliedSaleIds.has(saleId)) return;
+    d.general=updateDashboardMetric(d.general,amount,d.days);
+    if(sale.CATEGORIA==='Con congelador') d.con=updateDashboardMetric(d.con,amount,d.days);
+    if(sale.CATEGORIA==='Sin congelador') d.sin=updateDashboardMetric(d.sin,amount,d.days);
+    state.appliedSaleIds.add(saleId);
+  }
+
   function renderDashboard(){
     const d=state.data.dashboard;
     $('#page').innerHTML=`<section class="page">
@@ -771,7 +816,8 @@ function closeModal(){
     </form>`);
   }
   function openSale(client){
-    openModal('Registrar venta',esc(client.NOMBRE_NEGOCIO),`<form id="sale-form"><input type="hidden" name="clientId" value="${esc(client.ID_CLIENTE)}"><div class="info-tile" style="margin-bottom:14px"><div class="label">Categoría</div><div class="value">${esc(client.CATEGORIA)}</div></div><div class="field"><label>Monto</label><input name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Q 0.00" autofocus required></div><div class="form-actions"><button class="btn btn-secondary" type="button" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" type="submit">GUARDAR VENTA</button></div></form>`);
+    const saleId=saleOperationId();
+    openModal('Registrar venta',esc(client.NOMBRE_NEGOCIO),`<form id="sale-form"><input type="hidden" name="saleId" value="${esc(saleId)}"><input type="hidden" name="clientId" value="${esc(client.ID_CLIENTE)}"><div class="info-tile" style="margin-bottom:14px"><div class="label">Categoría</div><div class="value">${esc(client.CATEGORIA)}</div></div><div class="field"><label>Monto</label><input name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="Q 0.00" autofocus required></div><div class="form-actions"><button class="btn btn-secondary" type="button" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" type="submit">GUARDAR VENTA</button></div></form>`);
   }
   function openNewPeriod(){
     const now=new Date(), nextMonth=(state.data.period?Number(state.data.period.MES)%12+1:now.getMonth()+1), nextYear=state.data.period&&Number(state.data.period.MES)===12?Number(state.data.period.ANIO)+1:(state.data.period?Number(state.data.period.ANIO):now.getFullYear());
@@ -880,32 +926,38 @@ function closeModal(){
     if(e.target.id==='new-period-month'||e.target.id==='new-period-year'){state.newPeriodDates=new Set();rerenderNewPeriodCalendar();}
   }
 
-  async function handleSubmit(e){
-  e.preventDefault();
-
-  const f = e.target;
-
-  if(f.dataset.submitting === '1') return;
-
-  const btn = $('button[type="submit"]', f);
-
-  f.dataset.submitting = '1';
-
-  if(btn){
-    btn.dataset.originalHtml = btn.innerHTML;
-    btn.disabled = true;
-
-    if(f.id === 'login-form'){
-      btn.textContent = 'INGRESANDO...';
-    }else{
-      btn.textContent = 'GUARDANDO...';
+  function beginFormSubmit(f){
+    if(f.dataset.submitting==='1') return false;
+    f.dataset.submitting='1';
+    const btn=$('button[type="submit"]',f);
+    if(btn){
+      btn.dataset.originalHtml=btn.innerHTML;
+      btn.disabled=true;
+      btn.textContent=f.id==='login-form'?'INGRESANDO...':'GUARDANDO...';
+    }
+    return true;
+  }
+  function restoreFormSubmit(f){
+    delete f.dataset.submitting;
+    const btn=$('button[type="submit"]',f);
+    if(!btn) return;
+    btn.disabled=false;
+    if(Object.prototype.hasOwnProperty.call(btn.dataset,'originalHtml')){
+      btn.innerHTML=btn.dataset.originalHtml;
+      delete btn.dataset.originalHtml;
     }
   }
 
-  const fd = Object.fromEntries(new FormData(f).entries());
+  async function handleSubmit(e){
+    e.preventDefault();
+
+    const f=e.target;
+    if(!(f instanceof HTMLFormElement)) return;
+    if(!beginFormSubmit(f)) return;
+
+    const fd=Object.fromEntries(new FormData(f).entries());
     try{
       if(f.id==='login-form'){
-        const btn=$('button[type="submit"]',f);btn.disabled=true;btn.textContent='INGRESANDO...';
         const res=await api.request('login',{route:fd.route,password:fd.password}); state.session={token:res.token};localStorage.setItem('s360_session',JSON.stringify(state.session));
         try{await loadSession();}catch(err){showInitialLoader(true);throw err;} return;
       }
@@ -918,7 +970,9 @@ function closeModal(){
         const idx=state.data.clients.findIndex(x=>x.ID_CLIENTE===c.ID_CLIENTE); if(idx>=0)state.data.clients[idx]=c;else state.data.clients.push(c); closeModal(); toast('Cliente guardado','success'); navigate(state.view,false);return;
       }
       if(f.id==='sale-form'){
-        const res=await api.request('registerSale',{clientId:fd.clientId,amount:fd.amount}); state.data.dashboard=res.dashboard; closeModal();toast('Venta registrada','success');renderSales();return;
+        const res=await api.request('registerSale',{saleId:fd.saleId,clientId:fd.clientId,amount:fd.amount});
+        applyRegisteredSaleToDashboard(res.sale);
+        closeModal();toast('Venta registrada','success');renderSales();return;
       }
       if(f.id==='edit-sale-form'){
         const res=await api.request('updateSale',{saleId:fd.saleId,amount:fd.amount}); state.data.dashboard=res.dashboard; closeModal();toast('Venta actualizada','success');await renderHistory();return;
@@ -929,7 +983,11 @@ function closeModal(){
       if(f.id==='new-period-form'){
         const data=await api.request('startNewPeriod',{month:Number(fd.month),year:Number(fd.year),budgetCon:fd.budgetCon,budgetSin:fd.budgetSin,dates:[...state.newPeriodDates]});state.data=data;state.user=data.user;state.budgetDates=new Set((data.days||[]).filter(d=>d.DIA_PROGRAMADO==='SI').map(d=>String(d.FECHA).slice(0,10)));closeModal();toast('Nuevo período iniciado','success');navigate('inicio');return;
       }
-    }catch(err){toast(err.message,'error'); const b=$('button[type="submit"]',f);if(b){b.disabled=false;if(f.id==='login-form')b.textContent='INICIAR SESIÓN';}}
+    }catch(err){
+      toast(err.message,'error');
+    }finally{
+      if(f.isConnected) restoreFormSubmit(f);
+    }
   }
 
   async function saveNCFromModal(){
