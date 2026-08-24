@@ -881,7 +881,28 @@ function closeModal(){
   }
 
   async function handleSubmit(e){
-    e.preventDefault(); const f=e.target, fd=Object.fromEntries(new FormData(f).entries());
+  e.preventDefault();
+
+  const f = e.target;
+
+  if(f.dataset.submitting === '1') return;
+
+  const btn = $('button[type="submit"]', f);
+
+  f.dataset.submitting = '1';
+
+  if(btn){
+    btn.dataset.originalHtml = btn.innerHTML;
+    btn.disabled = true;
+
+    if(f.id === 'login-form'){
+      btn.textContent = 'INGRESANDO...';
+    }else{
+      btn.textContent = 'GUARDANDO...';
+    }
+  }
+
+  const fd = Object.fromEntries(new FormData(f).entries());
     try{
       if(f.id==='login-form'){
         const btn=$('button[type="submit"]',f);btn.disabled=true;btn.textContent='INGRESANDO...';
