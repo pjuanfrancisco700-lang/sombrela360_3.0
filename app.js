@@ -1,7 +1,6 @@
 (() => {
   "use strict";
-
-  const CONFIG = window.SOMBRELA_CONFIG || {};
+const pct =
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -36,7 +35,7 @@
 
   const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const money = v => new Intl.NumberFormat('es-GT',{style:'currency',currency:'GTQ',minimumFractionDigits:2}).format(Number(v||0)).replace('GTQ','Q');
-  const pct = v => `${Math.max(0,Number(v||0)).toFixed(1)}%`;
+  const pct = v => `${Math.max(0, Math.round(Number(v || 0)))}%`;
   const normalize = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
   const clamp = (n,min,max)=>Math.min(max,Math.max(min,n));
   const todayISO = () => new Date().toISOString().slice(0,10);
@@ -420,6 +419,10 @@ if(resetScroll){
   function titleForView(v){
     return ({inicio:'Inicio',ventas:'Ventas','ventas-history':'Historial',nc:'Nota de crédito',mas:'Más','mas-user':'Usuario','mas-budget':'Presupuesto','mas-clients':'Base de clientes','mas-about':'Sombrela 360'})[v]||'Sombrela 360';
   }
+
+  function progressRing(value,color='var(--blue)'){
+  const real = Math.max(0, Number(value || 0));
+  const visual = clamp(real, 0, 100);
 
   function progressRing(value,color='var(--blue)'){
   const real = Math.max(0, Number(value || 0));
