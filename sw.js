@@ -3,7 +3,7 @@ const CACHE = "sombrela360-v3.0.15";
 const STATIC = [
   "./",
   "./index.html",
-  "./styles.css?v=3.0.14",
+  "./styles.css?v=3.0.15",
   "./config.js",
   "./app.js?v=3.0.14",
   "./manifest.json",
