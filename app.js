@@ -135,7 +135,260 @@
     budgetDates:new Set(),
     newPeriodDates:new Set(),
     appliedSaleIds:new Set(),
+    bootstrapAt:0,
   };
+
+
+  // ---------- PENDING SALES / BACKGROUND SYNC ----------
+  // Las ventas se guardan primero en el dispositivo y luego se sincronizan
+  // automáticamente con Google Sheets usando el mismo ID_VENTA.
+  // El backend ya es idempotente: si el mismo saleId llega de nuevo,
+  // devuelve la venta existente en lugar de duplicarla.
+  const PENDING_SALES_KEY = 's360_pending_sales_v1';
+  let pendingSalesSyncPromise = null;
+
+  function readPendingSales(){
+    try{
+      const raw=JSON.parse(localStorage.getItem(PENDING_SALES_KEY)||'[]');
+      return Array.isArray(raw)?raw:[];
+    }catch{
+      return [];
+    }
+  }
+
+  function writePendingSales(items){
+    try{
+      localStorage.setItem(PENDING_SALES_KEY,JSON.stringify(items));
+    }catch{
+      throw new Error('No fue posible guardar la venta en el dispositivo. Libera espacio e intenta nuevamente.');
+    }
+  }
+
+  function pendingSalesForRoute(route){
+    route=String(route||'');
+    if(!route) return [];
+    return readPendingSales()
+      .filter(item=>String(item.route||'')===route)
+      .sort((a,b)=>Number(a.createdAt||0)-Number(b.createdAt||0));
+  }
+
+  function pendingSalesForCurrentUser(){
+    return pendingSalesForRoute(state.user?.RUTA);
+  }
+
+  function pendingSalesCount(){
+    return pendingSalesForCurrentUser().length;
+  }
+
+  function enqueuePendingSale(payload,client){
+    const route=String(state.user?.RUTA||'');
+    if(!route) throw new Error('Sesión no válida.');
+
+    const item={
+      saleId:String(payload.saleId||'').trim()||saleOperationId(),
+      clientId:String(payload.clientId||'').trim(),
+      amount:Number(payload.amount),
+      route,
+      userId:String(state.user?.ID_USUARIO||''),
+      clientName:String(client?.NOMBRE_NEGOCIO||''),
+      category:String(client?.CATEGORIA||''),
+      createdAt:Date.now(),
+      attempts:0,
+      lastAttemptAt:0,
+      lastError:'',
+      status:'pending'
+    };
+
+    if(!item.clientId) throw new Error('Cliente no válido.');
+    if(!(item.amount>0)) throw new Error('Monto no válido.');
+
+    const all=readPendingSales();
+    const existingIndex=all.findIndex(x=>String(x.saleId)===item.saleId);
+
+    if(existingIndex>=0){
+      item.createdAt=Number(all[existingIndex].createdAt||item.createdAt);
+      item.attempts=Number(all[existingIndex].attempts||0);
+      all[existingIndex]={...all[existingIndex],...item};
+    }else{
+      all.push(item);
+    }
+
+    writePendingSales(all);
+    return item;
+  }
+
+  function patchPendingSale(saleId,patch){
+    const all=readPendingSales();
+    const idx=all.findIndex(x=>String(x.saleId)===String(saleId));
+    if(idx<0) return;
+    all[idx]={...all[idx],...patch};
+    writePendingSales(all);
+  }
+
+  function removePendingSale(saleId){
+    const all=readPendingSales();
+    const next=all.filter(x=>String(x.saleId)!==String(saleId));
+    if(next.length!==all.length) writePendingSales(next);
+  }
+
+  function pendingSalesStatusHTML(){
+    const count=pendingSalesCount();
+    if(!count) return '';
+
+    const syncing=Boolean(pendingSalesSyncPromise);
+    const offline=typeof navigator!=='undefined' && navigator.onLine===false;
+    const plural=count===1?'venta':'ventas';
+    const stateText=offline
+      ? `${count} ${plural} guardada${count===1?'':'s'} en el dispositivo`
+      : syncing
+        ? `${count} ${plural} sincronizando...`
+        : `${count} ${plural} pendiente${count===1?'':'s'} de sincronizar`;
+
+    return `<div class="smart-message" style="margin:0 0 12px">
+      <span class="smart-dot" style="background:${offline?'var(--amber)':'var(--blue)'}"></span>
+      <span>${stateText}</span>
+      <button class="btn-link tiny" data-action="sync-pending-sales" ${syncing?'disabled':''} style="margin-left:auto">
+        ${syncing?'ENVIANDO...':'SINCRONIZAR'}
+      </button>
+    </div>`;
+  }
+
+  async function reconcileDashboardAfterDuplicate(expectedRoute,expectedToken){
+    if(!expectedRoute||!expectedToken) return;
+    if(String(state.user?.RUTA||'')!==String(expectedRoute)) return;
+    if(String(state.session?.token||'')!==String(expectedToken)) return;
+
+    const data=await api.request('bootstrap',{});
+
+    // La sesión podría haber cambiado mientras esperábamos la respuesta.
+    if(String(state.user?.RUTA||'')!==String(expectedRoute)) return;
+    if(String(state.session?.token||'')!==String(expectedToken)) return;
+    if(String(data.user?.RUTA||'')!==String(expectedRoute)) return;
+
+    state.data=data;
+    state.user=data.user;
+    state.bootstrapAt=Date.now();
+    state.budgetDates=new Set(
+      (data.days||[])
+        .filter(d=>d.DIA_PROGRAMADO==='SI')
+        .map(d=>String(d.FECHA).slice(0,10))
+    );
+  }
+
+  function syncPendingSales({notify=false}={}){
+    if(pendingSalesSyncPromise) return pendingSalesSyncPromise;
+
+    pendingSalesSyncPromise=(async()=>{
+      let synced=0;
+      let failure=null;
+      let needsReconcile=false;
+
+      if(!state.session?.token||!state.user){
+        return {synced:0,remaining:pendingSalesCount(),failure:null};
+      }
+
+      // Congelamos la identidad de la sesión durante este ciclo.
+      // Si el usuario cierra sesión o entra con otra ruta mientras una petición
+      // está en curso, nunca aplicamos esa venta al dashboard de la nueva ruta.
+      const syncRoute=String(state.user.RUTA||'');
+      const syncToken=String(state.session.token||'');
+
+      if(typeof navigator!=='undefined' && navigator.onLine===false){
+        if(notify) toast('Sin conexión. Las ventas pendientes siguen guardadas en el dispositivo.','error');
+        return {synced:0,remaining:pendingSalesForRoute(syncRoute).length,failure:null};
+      }
+
+      while(true){
+        if(String(state.user?.RUTA||'')!==syncRoute) break;
+        if(String(state.session?.token||'')!==syncToken) break;
+
+        const item=pendingSalesForRoute(syncRoute)[0];
+        if(!item) break;
+
+        const attempts=Number(item.attempts||0)+1;
+        try{
+          patchPendingSale(item.saleId,{
+            status:'syncing',
+            attempts,
+            lastAttemptAt:Date.now(),
+            lastError:''
+          });
+        }catch{}
+
+        try{
+          const res=await api.request('registerSale',{
+            saleId:item.saleId,
+            clientId:item.clientId,
+            amount:item.amount
+          });
+
+          removePendingSale(item.saleId);
+          synced++;
+
+          if(res?.sale){
+            const sameSession=
+              String(state.user?.RUTA||'')===syncRoute &&
+              String(state.session?.token||'')===syncToken;
+
+            if(sameSession){
+              // Si la venta ya existía y el dashboard fue cargado después de
+              // crear la pendiente, no sabemos si ya estaba incluida.
+              // En ese caso reconciliamos con el servidor para evitar sumar dos veces.
+              if(res.duplicate===true && Number(item.createdAt||0)<=Number(state.bootstrapAt||0)){
+                needsReconcile=true;
+              }else{
+                applyRegisteredSaleToDashboard(res.sale);
+              }
+            }
+          }
+        }catch(err){
+          failure=err;
+          try{
+            patchPendingSale(item.saleId,{
+              status:'pending',
+              lastError:String(err?.message||err||'Error de sincronización'),
+              lastAttemptAt:Date.now(),
+              attempts
+            });
+          }catch{}
+          break;
+        }
+      }
+
+      if(needsReconcile){
+        try{
+          await reconcileDashboardAfterDuplicate(syncRoute,syncToken);
+        }catch{
+          // La venta ya está protegida por ID en el backend.
+          // Si no se puede reconciliar ahora, el próximo bootstrap la corregirá.
+        }
+      }
+
+      if(state.data){
+        if(state.view==='ventas') renderSales();
+        else if(state.view==='inicio') renderDashboard();
+      }
+
+      const remaining=pendingSalesForRoute(syncRoute).length;
+
+      if(notify){
+        if(failure){
+          toast('La venta sigue guardada. No se pudo sincronizar todavía.','error');
+        }else if(synced>0){
+          toast(`${synced} ${synced===1?'venta sincronizada':'ventas sincronizadas'}`,'success');
+        }else if(!remaining){
+          toast('No hay ventas pendientes','success');
+        }
+      }
+
+      return {synced,remaining,failure};
+    })().finally(()=>{
+      pendingSalesSyncPromise=null;
+      if(state.data && state.view==='ventas') renderSales();
+    });
+
+    return pendingSalesSyncPromise;
+  }
 
   const api = {
     isDemo(){ return CONFIG.DEMO_MODE || !CONFIG.API_URL; },
@@ -327,6 +580,17 @@
     document.addEventListener('input',handleInput);
     document.addEventListener('change',handleChange);
     document.addEventListener('submit',handleSubmit);
+
+    window.addEventListener('online',()=>{
+      if(state.session?.token&&state.user) void syncPendingSales({notify:false});
+    });
+
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible'&&state.session?.token&&state.user){
+        void syncPendingSales({notify:false});
+      }
+    });
+
     if(state.session?.token){
       try{ await loadSession(); return; }catch{ localStorage.removeItem('s360_session'); state.session=null; }
     }
@@ -359,10 +623,14 @@
   async function loadSession(){
     showInitialLoader();
     const data=await api.request('bootstrap',{});
-    state.data=data; state.user=data.user; state.view='inicio';
+    state.data=data; state.user=data.user; state.view='inicio'; state.bootstrapAt=Date.now();
     state.budgetDates=new Set((data.days||[]).filter(d=>d.DIA_PROGRAMADO==='SI').map(d=>String(d.FECHA).slice(0,10)));
     renderShell();
     hideLoader();
+
+    // No bloquea la entrada a la app. Si quedaron ventas pendientes,
+    // se intentan enviar después de mostrar la interfaz.
+    void syncPendingSales({notify:false});
   }
 
   function showInitialLoader(error=false){
@@ -523,6 +791,7 @@ if(resetScroll){
         <div class="search"><span>${icon('search',18)}</span><input id="sales-search" value="${esc(state.salesSearch)}" placeholder="Escribe para buscar cliente..."></div>
         <button class="btn btn-outline btn-sm" data-action="open-create-client">+ Cliente</button>
       </div>
+      ${pendingSalesStatusHTML()}
       <div class="section-title"><h3>${state.salesSearch?'Resultados':'Clientes frecuentes'}</h3><span class="small muted">${clients.length} clientes</span></div>
       <div class="list" id="sales-client-list">
         ${clients.length?clients.map(clientListItem).join(''):`<div class="empty-state"><div class="empty-icon">${icon('users',22)}</div><h3>No encontramos clientes</h3><p>Prueba otra búsqueda o crea un cliente nuevo.</p></div>`}
@@ -864,7 +1133,11 @@ function closeModal(){
 
   async function refreshData(message='Actualizado'){
     try{
-      const data=await api.request('bootstrap',{}); state.data=data; state.user=data.user;
+      // Si hay ventas locales, intentamos enviarlas antes de volver a leer Sheets.
+      // Así el bootstrap siguiente trae un estado lo más consistente posible.
+      await syncPendingSales({notify:false});
+
+      const data=await api.request('bootstrap',{}); state.data=data; state.user=data.user; state.bootstrapAt=Date.now();
       state.budgetDates=new Set((data.days||[]).filter(d=>d.DIA_PROGRAMADO==='SI').map(d=>String(d.FECHA).slice(0,10)));
       navigate(state.view,false); toast(message,'success');
     }catch(err){toast(err.message,'error');}
@@ -880,6 +1153,7 @@ function closeModal(){
     if(a==='open-create-user'){await openCreateUser(el);return;}
     if(a==='retry-load'){try{await loadSession();}catch{showInitialLoader(true);}return;}
     if(a==='refresh'){await refreshData();return;}
+    if(a==='sync-pending-sales'){await syncPendingSales({notify:true});return;}
     if(a==='sales-category'){state.salesCategory=el.dataset.category;state.salesSearch='';renderSales();return;}
     if(a==='show-all-sales-clients'){refreshSalesList(true);el.parentElement?.remove();return;}
     if(a==='open-create-client'){openCreateClient();return;}
@@ -997,9 +1271,25 @@ function closeModal(){
         const idx=state.data.clients.findIndex(x=>x.ID_CLIENTE===c.ID_CLIENTE); if(idx>=0)state.data.clients[idx]=c;else state.data.clients.push(c); closeModal(); toast('Cliente guardado','success'); navigate(state.view,false);return;
       }
       if(f.id==='sale-form'){
-        const res=await api.request('registerSale',{saleId:fd.saleId,clientId:fd.clientId,amount:fd.amount});
-        applyRegisteredSaleToDashboard(res.sale);
-        closeModal();toast('Venta registrada','success');renderSales();return;
+        const client=(state.data?.clients||[]).find(x=>String(x.ID_CLIENTE)===String(fd.clientId));
+        if(!client) throw new Error('Cliente no válido.');
+
+        const item=enqueuePendingSale({
+          saleId:fd.saleId,
+          clientId:fd.clientId,
+          amount:fd.amount
+        },client);
+
+        // Desde aquí el usuario ya no espera a Google Apps Script.
+        // La venta quedó persistida en el teléfono antes de cerrar el modal.
+        closeModal();
+
+        // Iniciar el envío sin bloquear la interfaz.
+        void syncPendingSales({notify:false});
+
+        renderSales();
+        toast('Venta guardada · sincronizando','success');
+        return;
       }
       if(f.id==='edit-sale-form'){
         const res=await api.request('updateSale',{saleId:fd.saleId,amount:fd.amount}); state.data.dashboard=res.dashboard; closeModal();toast('Venta actualizada','success');await renderHistory();return;
