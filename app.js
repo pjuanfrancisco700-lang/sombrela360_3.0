@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-const pct =
+
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -419,10 +419,6 @@ if(resetScroll){
   function titleForView(v){
     return ({inicio:'Inicio',ventas:'Ventas','ventas-history':'Historial',nc:'Nota de crédito',mas:'Más','mas-user':'Usuario','mas-budget':'Presupuesto','mas-clients':'Base de clientes','mas-about':'Sombrela 360'})[v]||'Sombrela 360';
   }
-
-  function progressRing(value,color='var(--blue)'){
-  const real = Math.max(0, Number(value || 0));
-  const visual = clamp(real, 0, 100);
 
   function progressRing(value,color='var(--blue)'){
   const real = Math.max(0, Number(value || 0));
