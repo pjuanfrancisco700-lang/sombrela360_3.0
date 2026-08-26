@@ -1,4 +1,4 @@
-const CACHE = "sombrela360-v3.0.8";
+const CACHE = "sombrela360-v3.0.9";
 const STATIC = [
   "./",
   "./index.html",
@@ -7,7 +7,8 @@ const STATIC = [
   "./app.js",
   "./manifest.json",
   "./assets/icon-192.png",
-  "./assets/icon-512.png"
+  "./assets/icon-512.png",
+  "./assets/background-app.png"
 ];
 
 self.addEventListener("install", event => {
