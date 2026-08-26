@@ -423,7 +423,7 @@ if(resetScroll){
 
   function progressRing(value,color='var(--blue)'){
     const p=clamp(Number(value||0),0,100);
-    return `<div class="progress-ring" style="--p:${p};--ring:${color}"><div class="ring-text">${pct(p)}<span>Avance</span></div></div>`;
+    return `<div class="progress-ring" style="--p:${p};--ring:${color}"><div class="ring-text">${pct(value)}<span>Avance</span></div></div>`;
   }
   function smartMessage(p){
     if(p>=100) return 'Objetivo alcanzado 🎉';
