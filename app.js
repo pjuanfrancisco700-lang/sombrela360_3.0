@@ -36,7 +36,7 @@
 
   const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const money = v => new Intl.NumberFormat('es-GT',{style:'currency',currency:'GTQ',minimumFractionDigits:2}).format(Number(v||0)).replace('GTQ','Q');
-  const pct = v => `${Math.max(0,Math.min(999,Number(v||0))).toFixed(0)}%`;
+  const pct = v => `${Math.max(0,Number(v||0)).toFixed(1)}%`;
   const normalize = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
   const clamp = (n,min,max)=>Math.min(max,Math.max(min,n));
   const todayISO = () => new Date().toISOString().slice(0,10);
