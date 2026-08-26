@@ -5,7 +5,7 @@ const STATIC = [
   "./index.html",
   "./styles.css?v=3.0.16",
   "./config.js",
-  "./app.js?v=3.0.14",
+  "./app.js?v=3.0.16",
   "./manifest.json",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
@@ -16,7 +16,6 @@ self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE).then(cache => cache.addAll(STATIC))
   );
-
   self.skipWaiting();
 });
 
@@ -30,7 +29,6 @@ self.addEventListener("activate", event => {
       )
     )
   );
-
   self.clients.claim();
 });
 
@@ -45,38 +43,26 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  // Navegación: primero internet, luego caché
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
         .then(response => {
           const clone = response.clone();
-
-          caches.open(CACHE).then(cache => {
-            cache.put("./index.html", clone);
-          });
-
+          caches.open(CACHE).then(cache => cache.put("./index.html", clone));
           return response;
         })
         .catch(() => caches.match("./index.html"))
     );
-
     return;
   }
 
-  // Archivos de la app: primero internet.
-  // Si no hay conexión, usar la copia almacenada.
   event.respondWith(
     fetch(event.request)
       .then(response => {
         if (response && response.status === 200) {
           const clone = response.clone();
-
-          caches.open(CACHE).then(cache => {
-            cache.put(event.request, clone);
-          });
+          caches.open(CACHE).then(cache => cache.put(event.request, clone));
         }
-
         return response;
       })
       .catch(() => caches.match(event.request))
