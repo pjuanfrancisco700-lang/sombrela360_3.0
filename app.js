@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  const CONFIG = window.SOMBRELA_CONFIG || {};
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -35,7 +36,7 @@
 
   const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const money = v => new Intl.NumberFormat('es-GT',{style:'currency',currency:'GTQ',minimumFractionDigits:2}).format(Number(v||0)).replace('GTQ','Q');
-  const pct = v => `${Math.max(0, Math.round(Number(v || 0)))}%`;
+  const pct = v => `${Math.max(0,Math.min(999,Number(v||0))).toFixed(0)}%`;
   const normalize = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
   const clamp = (n,min,max)=>Math.min(max,Math.max(min,n));
   const todayISO = () => new Date().toISOString().slice(0,10);
@@ -421,13 +422,9 @@ if(resetScroll){
   }
 
   function progressRing(value,color='var(--blue)'){
-  const real = Math.max(0, Number(value || 0));
-  const visual = clamp(real, 0, 100);
-
-  return `<div class="progress-ring" style="--p:${visual};--ring:${color}">
-    <div class="ring-text">${pct(real)}<span>Avance</span></div>
-  </div>`;
-}
+    const p=clamp(Number(value||0),0,100);
+    return `<div class="progress-ring" style="--p:${p};--ring:${color}"><div class="ring-text">${pct(p)}<span>Avance</span></div></div>`;
+  }
   function smartMessage(p){
     if(p>=100) return 'Objetivo alcanzado 🎉';
     if(p>=85) return 'Estás cerca de tu objetivo';
