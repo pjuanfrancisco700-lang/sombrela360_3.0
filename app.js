@@ -793,15 +793,42 @@ function closeModal(){
     openModal(title,'',`<p class="about-copy" style="margin:0">${msg}</p><div class="form-actions"><button class="btn btn-secondary" data-action="close-modal">CANCELAR</button><button class="btn btn-danger" data-action="${onAction}" ${onData}>${okText}</button></div>`);
   }
 
-  async function openCreateUser(){
-    let agencies=[]; try{agencies=await api.request('getAgencies',{});}catch(e){return toast(e.message,'error');}
-    openModal('Crear usuario','Tu número de ruta será tu usuario.',`<form id="create-user-form">
-      <div class="field"><label>Agencia</label><select name="agencyId" required><option value="">Selecciona una agencia</option>${agencies.map(a=>`<option value="${esc(a.ID_AGENCIA)}">${esc(a.AGENCIA)}</option>`).join('')}</select></div>
-      <div class="field"><label>Nombre</label><input name="name" required autocomplete="given-name"></div>
-      <div class="field"><label>Apellido</label><input name="lastName" required autocomplete="family-name"></div>
-      <div class="field"><label>Número de ruta</label><input name="route" required inputmode="numeric"></div>
-      <button class="btn btn-primary btn-block" type="submit">CREAR USUARIO</button>
-    </form>`);
+  let createUserOpening = false;
+
+  async function openCreateUser(trigger){
+    if(createUserOpening) return;
+
+    createUserOpening = true;
+
+    if(trigger){
+      trigger.disabled = true;
+      trigger.style.opacity = '.45';
+      trigger.style.pointerEvents = 'none';
+      trigger.setAttribute('aria-busy','true');
+    }
+
+    try{
+      const agencies = await api.request('getAgencies',{});
+
+      openModal('Crear usuario','Tu número de ruta será tu usuario.',`<form id="create-user-form">
+        <div class="field"><label>Agencia</label><select name="agencyId" required><option value="">Selecciona una agencia</option>${agencies.map(a=>`<option value="${esc(a.ID_AGENCIA)}">${esc(a.AGENCIA)}</option>`).join('')}</select></div>
+        <div class="field"><label>Nombre</label><input name="name" required autocomplete="given-name"></div>
+        <div class="field"><label>Apellido</label><input name="lastName" required autocomplete="family-name"></div>
+        <div class="field"><label>Número de ruta</label><input name="route" required inputmode="numeric"></div>
+        <button class="btn btn-primary btn-block" type="submit">CREAR USUARIO</button>
+      </form>`);
+    }catch(e){
+      toast(e.message,'error');
+    }finally{
+      createUserOpening = false;
+
+      if(trigger){
+        trigger.disabled = false;
+        trigger.style.opacity = '';
+        trigger.style.pointerEvents = '';
+        trigger.removeAttribute('aria-busy');
+      }
+    }
   }
   function openCreateClient(edit=null){
     const c=edit;
@@ -850,7 +877,7 @@ function closeModal(){
     const a=el.dataset.action;
     if(a==='close-modal'){closeModal();return;}
     if(a==='close-modal-backdrop'&&e.target===el){closeModal();return;}
-    if(a==='open-create-user'){await openCreateUser();return;}
+    if(a==='open-create-user'){await openCreateUser(el);return;}
     if(a==='retry-load'){try{await loadSession();}catch{showInitialLoader(true);}return;}
     if(a==='refresh'){await refreshData();return;}
     if(a==='sales-category'){state.salesCategory=el.dataset.category;state.salesSearch='';renderSales();return;}
