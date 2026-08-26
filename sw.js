@@ -1,4 +1,4 @@
-const CACHE = "sombrela360-v3.0.14";
+const CACHE = "sombrela360-v3.0.15";
 
 const STATIC = [
   "./",
