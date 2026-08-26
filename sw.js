@@ -1,11 +1,11 @@
-const CACHE = "sombrela360-v3.0.15";
+const CACHE = "sombrela360-v3.0.16";
 
 const STATIC = [
   "./",
   "./index.html",
-  "./styles.css?v=3.0.15",
+  "./styles.css?v=3.0.16",
   "./config.js",
-  "./app.js?v=3.0.14",
+  "./app.js?v=3.0.16",
   "./manifest.json",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
