@@ -578,6 +578,44 @@
     return bootstrapFor(u);
   }
 
+  function clearLocalSession(){
+    localStorage.removeItem('s360_session');
+    state.session=null;
+    state.user=null;
+    state.data=null;
+  }
+
+  function saveLocalSession(token,expiresAt){
+    state.session={
+      token:String(token||''),
+      expiresAt:Number(expiresAt||0)
+    };
+    localStorage.setItem('s360_session',JSON.stringify(state.session));
+  }
+
+  function updateLocalSessionExpiry(expiresAt){
+    const expiry=Number(expiresAt||0);
+    if(!state.session?.token||!expiry) return;
+
+    state.session.expiresAt=expiry;
+    localStorage.setItem('s360_session',JSON.stringify(state.session));
+  }
+
+  function localSessionExpired(){
+    const expiry=Number(state.session?.expiresAt||0);
+    return Boolean(expiry && Date.now()>=expiry);
+  }
+
+  function isSessionAuthError(err){
+    const msg=String(err?.message||err||'').toLowerCase();
+    return (
+      msg.includes('sesión de 24 horas finalizó') ||
+      msg.includes('sesión venció') ||
+      msg.includes('sesión no válida') ||
+      msg.includes('usuario no disponible')
+    );
+  }
+
   async function init(){
     if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
     document.addEventListener('click',handleClick);
@@ -596,8 +634,25 @@
     });
 
     if(state.session?.token){
-      try{ await loadSession(); return; }catch{ localStorage.removeItem('s360_session'); state.session=null; }
+      // Si el teléfono ya conoce la expiración y pasaron las 24 horas,
+      // ni siquiera hacemos una petición innecesaria.
+      if(localSessionExpired()){
+        clearLocalSession();
+        renderLogin();
+        return;
+      }
+
+      try{
+        const loaded=await loadSession();
+        if(loaded) return;
+        return;
+      }catch{
+        // Un fallo de conexión NO borra la sesión.
+        // El loader queda en modo error con opción REINTENTAR.
+        return;
+      }
     }
+
     renderLogin();
   }
 
@@ -629,6 +684,11 @@
     state.user=data.user;
     state.view='inicio';
     state.bootstrapAt=Date.now();
+
+    if(data.sessionExpiresAt){
+      updateLocalSessionExpiry(data.sessionExpiresAt);
+    }
+
     state.budgetDates=new Set(
       (data.days||[])
         .filter(d=>d.DIA_PROGRAMADO==='SI')
@@ -648,8 +708,25 @@
 
   async function loadSession(){
     showInitialLoader();
-    const data=await api.request('bootstrap',{});
-    finishInitialLoad(data);
+
+    try{
+      const data=await api.request('bootstrap',{});
+      finishInitialLoad(data);
+      return true;
+    }catch(err){
+      if(isSessionAuthError(err)){
+        clearLocalSession();
+        hideLoader();
+        renderLogin();
+        toast('Tu sesión de 24 horas finalizó. Ingresa nuevamente.','error');
+        return false;
+      }
+
+      // Antes este error podía dejar el loader cubriendo la pantalla aunque
+      // la petición ya hubiera fallado. Ahora siempre cambia a estado recuperable.
+      showInitialLoader(true);
+      throw err;
+    }
   }
 
   function showInitialLoader(error=false){
@@ -683,6 +760,11 @@
   function navButton(view,ic,label){return `<button class="nav-btn ${state.view===view?'active':''}" data-view="${view}">${icon(ic,21)}<span>${label}</span></button>`;}
 
   function navigate(view,scroll=true){
+    // Durante una actualización del Service Worker puede existir un instante
+    // en el que llegue una navegación vieja antes de que #page esté montado.
+    // En ese caso simplemente ignoramos la acción en vez de lanzar una pantalla roja.
+    if(!$('#page')||!state.data||!state.user) return;
+
     state.view=view;
     $$('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===view || (view.startsWith('ventas')&&b.dataset.view==='ventas') || (view.startsWith('mas')&&b.dataset.view==='mas') || (view.startsWith('nc')&&b.dataset.view==='nc')));
     if(view==='inicio') renderDashboard();
@@ -1170,7 +1252,7 @@ function closeModal(){
     if(a==='close-modal'){closeModal();return;}
     if(a==='close-modal-backdrop'&&e.target===el){closeModal();return;}
     if(a==='open-create-user'){await openCreateUser(el);return;}
-    if(a==='retry-load'){try{await loadSession();}catch{showInitialLoader(true);}return;}
+    if(a==='retry-load'){try{await loadSession();}catch{}return;}
     if(a==='refresh'){await refreshData();return;}
     if(a==='sync-pending-sales'){await syncPendingSales({notify:true});return;}
     if(a==='sales-category'){state.salesCategory=el.dataset.category;state.salesSearch='';renderSales();return;}
@@ -1192,7 +1274,18 @@ function closeModal(){
     if(a==='save-nc'){await saveNCFromModal();return;}
     if(a==='reset-nc'){state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null};renderNC();return;}
     if(a==='logout'){confirmModal('Cerrar sesión','¿Deseas salir de Sombrela 360?','CERRAR SESIÓN','confirm-logout');return;}
-    if(a==='confirm-logout'){localStorage.removeItem('s360_session');state.session=null;state.user=null;state.data=null;closeModal();renderLogin();return;}
+    if(a==='confirm-logout'){
+      const token=state.session?.token||'';
+
+      clearLocalSession();
+      closeModal();
+      renderLogin();
+
+      // Se intenta invalidar también la sesión persistente del servidor,
+      // pero no hacemos esperar al vendedor para salir.
+      if(token) void api.request('logout',{token}).catch(()=>{});
+      return;
+    }
     if(a==='open-new-period'){openNewPeriod();return;}
     if(a==='toggle-date'){
   const set = el.dataset.set === 'new'
@@ -1289,10 +1382,9 @@ function closeModal(){
             password:fd.password
           });
 
-          state.session={token:res.token};
-          localStorage.setItem(
-            's360_session',
-            JSON.stringify(state.session)
+          saveLocalSession(
+            res.token,
+            res.expiresAt || res.data?.sessionExpiresAt
           );
 
           // Backend nuevo: login ya incluye bootstrap.
