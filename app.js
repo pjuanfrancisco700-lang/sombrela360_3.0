@@ -422,9 +422,13 @@ if(resetScroll){
   }
 
   function progressRing(value,color='var(--blue)'){
-    const p=clamp(Number(value||0),0,100);
-    return `<div class="progress-ring" style="--p:${p};--ring:${color}"><div class="ring-text">${pct(p)}<span>Avance</span></div></div>`;
-  }
+  const real = Math.max(0, Number(value || 0));
+  const visual = clamp(real, 0, 100);
+
+  return `<div class="progress-ring" style="--p:${visual};--ring:${color}">
+    <div class="ring-text">${pct(real)}<span>Avance</span></div>
+  </div>`;
+}
   function smartMessage(p){
     if(p>=100) return 'Objetivo alcanzado 🎉';
     if(p>=85) return 'Estás cerca de tu objetivo';
