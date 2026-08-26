@@ -1,4 +1,4 @@
-const CACHE = "sombrela360-v3.0.12";
+const CACHE = "sombrela360-v3.0.13";
 const STATIC = [
   "./",
   "./index.html",
