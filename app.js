@@ -459,7 +459,11 @@
       case 'login': {
         const u=demo.usuarios.find(x=>x.RUTA===String(p.route).trim()&&String(x.CONTRASENA)===String(p.password)&&x.ESTADO==='ACTIVO');
         if(!u) throw new Error('Usuario o contraseña incorrectos');
-        return {token:`demo-${u.ID_USUARIO}`,user:{...u,CONTRASENA:undefined}};
+        return {
+          token:`demo-${u.ID_USUARIO}`,
+          user:{...u,CONTRASENA:undefined},
+          data:bootstrapFor(u)
+        };
       }
       case 'createUser': {
         if(demo.usuarios.some(u=>u.RUTA===String(p.route).trim())) throw new Error('La ruta ya está registrada');
@@ -620,17 +624,32 @@
       </section>`;
   }
 
-  async function loadSession(){
-    showInitialLoader();
-    const data=await api.request('bootstrap',{});
-    state.data=data; state.user=data.user; state.view='inicio'; state.bootstrapAt=Date.now();
-    state.budgetDates=new Set((data.days||[]).filter(d=>d.DIA_PROGRAMADO==='SI').map(d=>String(d.FECHA).slice(0,10)));
+  function applyBootstrapData(data){
+    state.data=data;
+    state.user=data.user;
+    state.view='inicio';
+    state.bootstrapAt=Date.now();
+    state.budgetDates=new Set(
+      (data.days||[])
+        .filter(d=>d.DIA_PROGRAMADO==='SI')
+        .map(d=>String(d.FECHA).slice(0,10))
+    );
+  }
+
+  function finishInitialLoad(data){
+    applyBootstrapData(data);
     renderShell();
     hideLoader();
 
     // No bloquea la entrada a la app. Si quedaron ventas pendientes,
     // se intentan enviar después de mostrar la interfaz.
     void syncPendingSales({notify:false});
+  }
+
+  async function loadSession(){
+    showInitialLoader();
+    const data=await api.request('bootstrap',{});
+    finishInitialLoad(data);
   }
 
   function showInitialLoader(error=false){
@@ -1259,8 +1278,37 @@ function closeModal(){
     const fd=Object.fromEntries(new FormData(f).entries());
     try{
       if(f.id==='login-form'){
-        const res=await api.request('login',{route:fd.route,password:fd.password}); state.session={token:res.token};localStorage.setItem('s360_session',JSON.stringify(state.session));
-        try{await loadSession();}catch(err){showInitialLoader(true);throw err;} return;
+        // Mostramos inmediatamente una sola pantalla de carga.
+        // Ya no dejamos al usuario esperando primero "INGRESANDO..." y luego
+        // hacemos otra petición separada para cargar los datos.
+        showInitialLoader();
+
+        try{
+          const res=await api.request('login',{
+            route:fd.route,
+            password:fd.password
+          });
+
+          state.session={token:res.token};
+          localStorage.setItem(
+            's360_session',
+            JSON.stringify(state.session)
+          );
+
+          // Backend nuevo: login ya incluye bootstrap.
+          if(res.data){
+            finishInitialLoad(res.data);
+          }else{
+            // Compatibilidad temporal si todavía estuviera publicada una
+            // versión anterior de Code.gs.
+            await loadSession();
+          }
+        }catch(err){
+          hideLoader();
+          throw err;
+        }
+
+        return;
       }
       if(f.id==='create-user-form'){
         const data=await api.request('createUser',{agencyId:fd.agencyId,name:fd.name,lastName:fd.lastName,route:fd.route});
