@@ -513,7 +513,7 @@ if(resetScroll){
     $('#page').innerHTML=`<section class="page">
       <div class="page-head">
         <div><h2>Registrar venta</h2><p>Selecciona el tipo y luego el cliente.</p></div>
-        <div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="open-history" title="Historial">${icon('history',20)}</button><button class="icon-btn" data-action="open-create-client" title="Nuevo cliente">${icon('plus',21)}</button></div>
+        <div class="page-head-actions"><button class="icon-btn" data-action="open-history" title="Historial">${icon('history',20)}</button><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button></div>
       </div>
       <div class="segmented">
         <button class="${state.salesCategory==='Con congelador'?'active':''}" data-action="sales-category" data-category="Con congelador">❄️ Con congelador</button>
