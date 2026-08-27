@@ -1,11 +1,11 @@
-const CACHE = "sombrela360-v3.0.24";
+const CACHE = "sombrela360-v4.0.0";
 
 const STATIC = [
   "./",
   "./index.html",
-  "./styles.css?v=3.0.14",
-  "./config.js",
-  "./app.js?v=3.0.24",
+  "./styles.css?v=4.0.0",
+  "./config.js?v=4.0.0",
+  "./app.js?v=4.0.0",
   "./manifest.json",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
@@ -25,7 +25,13 @@ self.addEventListener("activate", event => {
     caches.keys().then(keys =>
       Promise.all(
         keys
-          .filter(key => key !== CACHE)
+          .filter(key =>
+            key !== CACHE &&
+            (
+              key.startsWith("sombrela360-") ||
+              key.startsWith("sombrela365-")
+            )
+          )
           .map(key => caches.delete(key))
       )
     )
@@ -35,26 +41,31 @@ self.addEventListener("activate", event => {
 });
 
 self.addEventListener("fetch", event => {
-  const url = new URL(event.request.url);
+  const request = event.request;
+  const url = new URL(request.url);
 
+  // Solo manejar solicitudes GET del mismo origen.
+  // Las peticiones a Google Apps Script u otros servicios externos
+  // continúan directamente por internet.
   if (
-    event.request.method !== "GET" ||
-    url.hostname.includes("script.google.com") ||
-    url.hostname.includes("googleusercontent.com")
+    request.method !== "GET" ||
+    url.origin !== self.location.origin
   ) {
     return;
   }
 
-  // Navegación: primero internet, luego caché
-  if (event.request.mode === "navigate") {
+  // Navegación: primero internet y, si falla, usar el index almacenado.
+  if (request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then(response => {
-          const clone = response.clone();
+          if (response && response.ok) {
+            const clone = response.clone();
 
-          caches.open(CACHE).then(cache => {
-            cache.put("./index.html", clone);
-          });
+            caches.open(CACHE).then(cache => {
+              cache.put("./index.html", clone);
+            });
+          }
 
           return response;
         })
@@ -67,18 +78,18 @@ self.addEventListener("fetch", event => {
   // Archivos de la app: primero internet.
   // Si no hay conexión, usar la copia almacenada.
   event.respondWith(
-    fetch(event.request)
+    fetch(request)
       .then(response => {
-        if (response && response.status === 200) {
+        if (response && response.ok) {
           const clone = response.clone();
 
           caches.open(CACHE).then(cache => {
-            cache.put(event.request, clone);
+            cache.put(request, clone);
           });
         }
 
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(request))
   );
 });
