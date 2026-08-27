@@ -1061,6 +1061,41 @@ if(resetScroll){
   }
   let ncCatalogLoading=false;
   let ncCatalogRequestId=0;
+  const NC_CATALOG_CACHE_MS=10*60*1000;
+  const ncCatalogCache=new Map();
+  const ncCatalogInflight=new Map();
+
+  function cachedNcCatalog(channel){
+    const key=String(channel||'');
+    const entry=ncCatalogCache.get(key);
+    if(!entry) return null;
+    if(Date.now()-Number(entry.loadedAt||0)>NC_CATALOG_CACHE_MS){
+      ncCatalogCache.delete(key);
+      return null;
+    }
+    return Array.isArray(entry.catalog)?entry.catalog:null;
+  }
+
+  function getNcCatalogFast(channel,{force=false}={}){
+    const key=String(channel||'');
+    if(!key) return Promise.resolve([]);
+    if(!force){
+      const cached=cachedNcCatalog(key);
+      if(cached) return Promise.resolve(cached);
+      if(ncCatalogInflight.has(key)) return ncCatalogInflight.get(key);
+    }
+    const request=api.request('getNcCatalog',{channel:key})
+      .then(catalog=>{
+        const clean=Array.isArray(catalog)?catalog:[];
+        ncCatalogCache.set(key,{catalog:clean,loadedAt:Date.now()});
+        return clean;
+      })
+      .finally(()=>{
+        if(ncCatalogInflight.get(key)===request) ncCatalogInflight.delete(key);
+      });
+    ncCatalogInflight.set(key,request);
+    return request;
+  }
 
   function renderNcCatalogLoading(){
     return `<div class="nc-catalog-loading" role="status" aria-live="polite" aria-busy="true">
@@ -1075,20 +1110,31 @@ if(resetScroll){
     </div>`;
   }
 
-  async function loadNcCatalog(){
-    if(!state.ncDraft.channel) return;
+  async function loadNcCatalog({force=false}={}){
+    if(!state.ncDraft.channel) return [];
 
     const channel=String(state.ncDraft.channel);
     const requestId=++ncCatalogRequestId;
+    const cached=!force?cachedNcCatalog(channel):null;
+
+    if(cached){
+      state.ncDraft.catalog=cached;
+      ncCatalogLoading=false;
+      renderNC();
+      return cached;
+    }
+
     ncCatalogLoading=true;
     renderNC();
 
     try{
-      const catalog=await api.request('getNcCatalog',{channel});
-      if(requestId!==ncCatalogRequestId||String(state.ncDraft.channel)!==channel) return;
-      state.ncDraft.catalog=Array.isArray(catalog)?catalog:[];
+      const catalog=await getNcCatalogFast(channel,{force});
+      if(requestId!==ncCatalogRequestId||String(state.ncDraft.channel)!==channel) return catalog;
+      state.ncDraft.catalog=catalog;
+      return catalog;
     }catch(err){
       if(requestId===ncCatalogRequestId) toast(err.message,'error');
+      return [];
     }finally{
       if(requestId===ncCatalogRequestId){
         ncCatalogLoading=false;
@@ -1096,6 +1142,7 @@ if(resetScroll){
       }
     }
   }
+
   function renderNC(){
     const draft=state.ncDraft, motive=currentMotive();
     const motives=(state.data.motives||[]).filter(m=>m.CANAL===draft.channel);
@@ -1112,9 +1159,9 @@ if(resetScroll){
       <div class="stepper"><span class="on"></span><span class="${draft.channel?'on':''}"></span><span class="${ready?'on':''}"></span></div>
       <div class="section-title"><h3>1. Selecciona el canal</h3></div>
       <div class="option-grid">
-        ${(state.data.channels||[]).map(c=>`<button class="option-card ${draft.channel===c.NOMBRE_CANAL?'active':''}" data-action="nc-channel" data-channel="${esc(c.NOMBRE_CANAL)}" ${ncCatalogLoading?'disabled aria-disabled="true"':''}><div class="option-title">${esc(c.NOMBRE_CANAL)}</div><div class="option-sub">Precios correspondientes al canal</div></button>`).join('')}
+        ${(state.data.channels||[]).map(c=>`<button class="option-card ${draft.channel===c.NOMBRE_CANAL?'active':''}" data-action="nc-channel" data-channel="${esc(c.NOMBRE_CANAL)}"><div class="option-title">${esc(c.NOMBRE_CANAL)}</div><div class="option-sub">Precios correspondientes al canal</div></button>`).join('')}
       </div>
-      ${draft.channel?`<div class="section-title"><h3>2. Motivo</h3></div><div class="field" style="margin-bottom:10px"><select id="nc-motive" ${ncCatalogLoading?'disabled aria-busy="true"':''}><option value="">Selecciona un motivo</option>${motives.map(m=>`<option value="${esc(m.ID_MOTIVO)}" ${draft.motiveId===m.ID_MOTIVO?'selected':''}>${esc(m.MOTIVO)} · ${Math.round(Number(m.PORCENTAJE_APLICACION)*100)}%</option>`).join('')}</select></div>`:''}
+      ${draft.channel?`<div class="section-title"><h3>2. Motivo</h3></div><div class="field" style="margin-bottom:10px"><select id="nc-motive"><option value="">Selecciona un motivo</option>${motives.map(m=>`<option value="${esc(m.ID_MOTIVO)}" ${draft.motiveId===m.ID_MOTIVO?'selected':''}>${esc(m.MOTIVO)} · ${Math.round(Number(m.PORCENTAJE_APLICACION)*100)}%</option>`).join('')}</select></div>`:''}
       ${ready?(ncCatalogLoading?`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Cargando catálogo</span></div>${renderNcCatalogLoading()}`:`${draft.editId?`<div class="section-title"><h3>3. Productos seleccionados</h3><span class="small muted">${totals.units} unidades</span></div>
         ${renderNcSelectedEditor(totals.items)}
         <div class="section-title nc-add-more-title"><h3>Agregar más productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`:`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`}
@@ -1359,6 +1406,7 @@ function closeModal(){
 
   async function refreshData(message='Actualizado'){
     try{
+      ncCatalogCache.clear();
       // Si hay ventas locales, intentamos enviarlas antes de volver a leer Sheets.
       // Así el bootstrap siguiente trae un estado lo más consistente posible.
       await syncPendingSales({notify:false});
@@ -1387,8 +1435,16 @@ function closeModal(){
     if(a==='open-history'){navigate('ventas-history');return;}
     if(a==='back-sales'){navigate('ventas');return;}
     if(a==='nc-channel'){
-      if(state.ncDraft.channel!==el.dataset.channel){state.ncDraft.channel=el.dataset.channel;state.ncDraft.motiveId='';state.ncDraft.items={};state.ncDraft.catalog=[];}
-      renderNC(); return;
+      if(state.ncDraft.channel!==el.dataset.channel){
+        state.ncDraft.channel=el.dataset.channel;
+        state.ncDraft.motiveId='';
+        state.ncDraft.items={};
+        state.ncDraft.catalog=[];
+      }
+      renderNC();
+      // Empezamos a traer productos y precios mientras el usuario selecciona el motivo.
+      void loadNcCatalog();
+      return;
     }
     if(a==='nc-qty'||a==='nc-qty-modal'){
       const id=el.dataset.product, d=Number(el.dataset.delta); state.ncDraft.items[id]=Math.max(0,Number(state.ncDraft.items[id]||0)+d); if(!state.ncDraft.items[id])delete state.ncDraft.items[id];
@@ -1499,7 +1555,8 @@ function closeModal(){
     if(e.target.id==='history-month'){state.historyMonth=e.target.value;refreshHistory();}
     if(e.target.id==='nc-motive'){
       state.ncDraft.motiveId=e.target.value;
-      if(state.ncDraft.motiveId&&!state.ncDraft.catalog.length) await loadNcCatalog(); else renderNC();
+      renderNC();
+      if(state.ncDraft.motiveId&&!state.ncDraft.catalog.length) void loadNcCatalog();
     }
     if(e.target.id==='nc-client') state.ncDraft.clientId=e.target.value;
     if(e.target.id==='new-period-month'||e.target.id==='new-period-year'){state.newPeriodDates=new Set();rerenderNewPeriodCalendar();}
@@ -1661,7 +1718,7 @@ function closeModal(){
     ncSavePromise=(async()=>{
       try{
         const res=await api.request(state.ncDraft.editId?'updateNC':'saveNC',payload);
-        state.data.dashboard=res.dashboard;
+        if(res?.dashboard) state.data.dashboard=res.dashboard;
         state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null,clientId:'',operationId:''};
         closeModal();
         toast(res?.duplicate?'Nota de crédito ya registrada':'Nota de crédito guardada','success');
@@ -1690,25 +1747,39 @@ function closeModal(){
       const ncMeta=[dateLabel(n.FECHA||x.FECHA),timeLabel(n.HORA||x.HORA)].filter(Boolean).join(' · ');
       const detailItems=Array.isArray(n.items)?n.items:[];
       const totalUnits=detailItems.reduce((sum,i)=>sum+Number(i.CANTIDAD||0),0);
+      const detailSubtotal=detailItems.reduce((sum,i)=>sum+Number(i.SUBTOTAL||0),0);
+      const detailIncomplete=detailItems.length>0&&Math.abs(detailSubtotal-Number(n.SUBTOTAL||0))>=0.005;
       const productDetail=detailItems.length?`<div class="nc-detail-products">
         <div class="nc-detail-products-head"><strong>Productos</strong><span>${detailItems.length} ${detailItems.length===1?'producto':'productos'} · ${totalUnits} ${totalUnits===1?'unidad':'unidades'}</span></div>
         ${detailItems.map(i=>`<div class="nc-detail-product-row"><div><div class="nc-detail-product-name">${esc(i.PRODUCTO||'Producto')}</div><div class="nc-detail-product-meta">${money(i.PRECIO_UNITARIO)} × ${Number(i.CANTIDAD||0)}</div></div><strong>${money(i.SUBTOTAL)}</strong></div>`).join('')}
       </div>`:`<div class="nc-detail-empty">Este registro no tiene detalle de productos almacenado.</div>`;
-      openModal('Detalle de NC',esc(x.CLIENTE||''),`${ncMeta?`<div class="history-detail-date">${esc(ncMeta)}</div>`:''}<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div>${productDetail}<div class="summary-line"><span>Subtotal productos</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);
+      const detailWarning=detailIncomplete?`<div class="nc-detail-empty">El detalle histórico está incompleto: los productos almacenados suman ${money(detailSubtotal)}, pero la NC fue registrada con subtotal ${money(n.SUBTOTAL)}.</div>`:'';
+      openModal('Detalle de NC',esc(x.CLIENTE||''),`${ncMeta?`<div class="history-detail-date">${esc(ncMeta)}</div>`:''}<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div>${productDetail}${detailWarning}<div class="summary-line"><span>Subtotal productos</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);
     }catch(err){toast(err.message,'error');}
   }
   async function historyEdit(kind,id){
     const x=(state.history||[]).find(i=>(kind==='VENTA'?i.ID_VENTA:i.ID_NC)===id);if(!x)return;
     if(kind==='VENTA'){openModal('Editar venta',esc(x.CLIENTE||''),`<form id="edit-sale-form"><input type="hidden" name="saleId" value="${esc(id)}"><div class="field"><label>Monto</label><input name="amount" type="number" min="0.01" step="0.01" value="${Number(x.MONTO||0)}" required></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" type="submit">GUARDAR</button></div></form>`);return;}
     try{
-      const n=await api.request('getNCDetail',{ncId:id});
+      // Historial ya conoce el canal, así que detalle y catálogo pueden cargarse en paralelo.
+      const channel=String(x.CANAL||'');
+      const [n,catalog]=await Promise.all([
+        api.request('getNCDetail',{ncId:id}),
+        channel?getNcCatalogFast(channel):Promise.resolve([])
+      ]);
+      const finalCatalog=catalog.length?catalog:await getNcCatalogFast(n.CANAL);
       const motive=(state.data.motives||[]).find(m=>m.CANAL===n.CANAL&&m.MOTIVO===n.MOTIVO);
-      const catalog=await api.request('getNcCatalog',{channel:n.CANAL});
-      const items=hydrateNcItems(n.items||[],catalog);
-      state.ncDraft={channel:n.CANAL,motiveId:motive?.ID_MOTIVO||'',items,catalog,editId:n.ID_NC,clientId:n.ID_CLIENTE||'',operationId:''};
+      const items=hydrateNcItems(n.items||[],finalCatalog);
+      state.ncDraft={channel:n.CANAL,motiveId:motive?.ID_MOTIVO||'',items,catalog:finalCatalog,editId:n.ID_NC,clientId:n.ID_CLIENTE||'',operationId:''};
       closeModal();
       navigate('nc');
-      if(!(n.items||[]).length) toast('Esta NC no tiene detalle de productos almacenado','error');
+      const savedItems=Array.isArray(n.items)?n.items:[];
+      const savedDetailSubtotal=savedItems.reduce((sum,item)=>sum+Number(item.SUBTOTAL||0),0);
+      if(!savedItems.length){
+        toast('Esta NC no tiene detalle de productos almacenado','error');
+      }else if(Math.abs(savedDetailSubtotal-Number(n.SUBTOTAL||0))>=0.005){
+        toast('El detalle histórico de esta NC está incompleto. Revisa los productos antes de guardar.','error');
+      }
     }catch(err){toast(err.message,'error');}
   }
   async function historyDelete(kind,id){
