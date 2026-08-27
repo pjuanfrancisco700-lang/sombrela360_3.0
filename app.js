@@ -60,6 +60,30 @@
     const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);
     return new Intl.DateTimeFormat('es-GT',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(y,m-1,d));
   };
+  const timeLabel = value => {
+    if(!value) return '';
+    const raw=String(value).trim();
+    let hours=null, minutes=null;
+    const simple=raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?/);
+    if(simple){
+      hours=Number(simple[1]);
+      minutes=Number(simple[2]);
+    }else{
+      const parsed=new Date(raw);
+      if(!Number.isNaN(parsed.getTime())){
+        hours=parsed.getHours();
+        minutes=parsed.getMinutes();
+      }
+    }
+    if(!Number.isFinite(hours)||!Number.isFinite(minutes)||hours<0||hours>23||minutes<0||minutes>59) return raw;
+    return new Intl.DateTimeFormat('es-GT',{hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(2000,0,1,hours,minutes));
+  };
+  const monthLabel = ym => {
+    const [y,m]=String(ym||'').split('-').map(Number);
+    if(!y||!m) return String(ym||'');
+    const label=new Intl.DateTimeFormat('es-GT',{month:'long',year:'numeric'}).format(new Date(y,m-1,1));
+    return label.charAt(0).toUpperCase()+label.slice(1);
+  };
   const monthName = (m) => ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][Number(m)] || '';
 
   function createDemoDB(){
@@ -926,10 +950,10 @@ if(resetScroll){
       const months=[...new Set(items.map(x=>String(x.FECHA||'').slice(0,7)).filter(Boolean))].sort().reverse();
       $('#page').innerHTML=`<section class="page">
         <div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div>
-        <div class="search" style="margin-bottom:9px"><span>${icon('search',18)}</span><input id="history-search" value="${esc(state.historySearch)}" placeholder="Buscar cliente..."></div>
+        <div class="search" style="margin-bottom:9px"><span>${icon('search',18)}</span><input id="history-search" value="${esc(state.historySearch)}" placeholder="Buscar en historial..."></div>
         <div class="filter-row">
           <select id="history-type"><option value="TODOS">Todos los tipos</option><option value="VENTA" ${state.historyType==='VENTA'?'selected':''}>Ventas</option><option value="NC" ${state.historyType==='NC'?'selected':''}>Notas de crédito</option></select>
-          <select id="history-month"><option value="TODOS">Todos los meses</option>${months.map(m=>`<option value="${m}" ${state.historyMonth===m?'selected':''}>${m}</option>`).join('')}</select>
+          <select id="history-month"><option value="TODOS">Todos los meses</option>${months.map(m=>`<option value="${m}" ${state.historyMonth===m?'selected':''}>${esc(monthLabel(m))}</option>`).join('')}</select>
         </div>
         <div id="history-list"></div>
       </section>`;
@@ -943,12 +967,20 @@ if(resetScroll){
   }
   function historyCard(x){
     const sale=x.kind==='VENTA';
+    const meta=[dateLabel(x.FECHA),timeLabel(x.HORA)].filter(Boolean).join(' · ');
+    const tag=sale?x.CATEGORIA:x.CANAL;
     return `<article class="history-card">
-      <div class="history-top">
-        <div><div class="history-type ${sale?'':'nc'}">${sale?'Venta':'Nota de crédito'}</div><div class="history-title">${esc(x.CLIENTE||'Cliente')}</div><div class="history-sub">${dateLabel(x.FECHA)} · ${esc(x.HORA||'')} ${sale?`· ${esc(x.CATEGORIA||'')}`:`· ${esc(x.CANAL||'')}`}</div></div>
-        <div class="history-amount">${money(sale?x.MONTO:x.TOTAL_NC)}${!sale?`<div class="tiny muted">Subtotal ${money(x.SUBTOTAL)}</div>`:''}</div>
+      <div class="history-card-head">
+        <div class="history-type ${sale?'':'nc'}">${sale?'Venta':'Nota de crédito'}</div>
+        <div class="history-amount-wrap">
+          ${!sale?'<div class="history-amount-label">Total NC</div>':''}
+          <div class="history-amount">${money(sale?x.MONTO:x.TOTAL_NC)}</div>
+        </div>
       </div>
-      ${!sale&&x.MOTIVO?`<div class="small muted" style="margin-top:8px">${esc(x.MOTIVO)}</div>`:''}
+      <div class="history-title">${esc(x.CLIENTE||'Cliente')}</div>
+      ${meta?`<div class="history-meta">${esc(meta)}</div>`:''}
+      ${tag?`<div class="history-tags"><span class="history-tag ${sale?'sale':'nc'}">${esc(tag)}</span></div>`:''}
+      ${!sale&&x.MOTIVO?`<div class="history-reason"><span>Motivo</span><strong>${esc(x.MOTIVO)}</strong></div>`:''}
       <div class="history-actions">
         <button data-action="history-view" data-kind="${x.kind}" data-id="${sale?x.ID_VENTA:x.ID_NC}">Ver</button>
         <button data-action="history-edit" data-kind="${x.kind}" data-id="${sale?x.ID_VENTA:x.ID_NC}">Editar</button>
@@ -1460,9 +1492,13 @@ function closeModal(){
   async function historyView(kind,id){
     const x=(state.history||[]).find(i=>(kind==='VENTA'?i.ID_VENTA:i.ID_NC)===id);if(!x)return;
     if(kind==='VENTA'){
-      openModal('Detalle de venta',esc(x.CLIENTE||''),`${infoTile('Fecha',`${dateLabel(x.FECHA)} · ${x.HORA||''}`)}<div style="height:8px"></div>${infoTile('Categoría',x.CATEGORIA)}<div style="height:8px"></div>${infoTile('Monto',money(x.MONTO))}`);return;
+      openModal('Detalle de venta',esc(x.CLIENTE||''),`${infoTile('Fecha y hora',[dateLabel(x.FECHA),timeLabel(x.HORA)].filter(Boolean).join(' · '))}<div style="height:8px"></div>${infoTile('Categoría',x.CATEGORIA)}<div style="height:8px"></div>${infoTile('Monto',money(x.MONTO))}`);return;
     }
-    try{const n=await api.request('getNCDetail',{ncId:id});openModal('Detalle de NC',esc(x.CLIENTE||''),`<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div><div style="margin:10px 0">${(n.items||[]).map(i=>`<div class="cart-item"><div><div class="cart-item-title">${esc(i.PRODUCTO)}</div><div class="cart-item-price">${money(i.PRECIO_UNITARIO)} × ${i.CANTIDAD}</div></div><strong>${money(i.SUBTOTAL)}</strong></div>`).join('')}</div><div class="summary-line"><span>Subtotal</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);}catch(err){toast(err.message,'error');}
+    try{
+      const n=await api.request('getNCDetail',{ncId:id});
+      const ncMeta=[dateLabel(n.FECHA||x.FECHA),timeLabel(n.HORA||x.HORA)].filter(Boolean).join(' · ');
+      openModal('Detalle de NC',esc(x.CLIENTE||''),`${ncMeta?`<div class="history-detail-date">${esc(ncMeta)}</div>`:''}<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div><div style="margin:10px 0">${(n.items||[]).map(i=>`<div class="cart-item"><div><div class="cart-item-title">${esc(i.PRODUCTO)}</div><div class="cart-item-price">${money(i.PRECIO_UNITARIO)} × ${i.CANTIDAD}</div></div><strong>${money(i.SUBTOTAL)}</strong></div>`).join('')}</div><div class="summary-line"><span>Subtotal productos</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);
+    }catch(err){toast(err.message,'error');}
   }
   async function historyEdit(kind,id){
     const x=(state.history||[]).find(i=>(kind==='VENTA'?i.ID_VENTA:i.ID_NC)===id);if(!x)return;
