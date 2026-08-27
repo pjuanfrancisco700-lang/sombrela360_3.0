@@ -1211,7 +1211,7 @@ if(resetScroll){
   function backHeader(title,sub){return `<div class="page-head"><div><h2>${title}</h2><p>${sub}</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-view="mas" aria-label="Volver">${icon('back',21)}</button></div></div>`;}
   function renderUser(){
     const u=state.user;
-    $('#page').innerHTML=`<section class="page">${backHeader('Usuario','Información obtenida desde Google Sheets.')}
+    $('#page').innerHTML=`<section class="page">${backHeader('Usuario','Datos del usuario.')}
       <div class="info-grid">
         ${infoTile('Nombre',u.NOMBRE)}${infoTile('Apellido',u.APELLIDO)}${infoTile('Ruta',u.RUTA)}${infoTile('Agencia',u.AGENCIA)}${infoTile('ID usuario',u.ID_USUARIO)}${infoTile('Fecha de creación',dateLabel(u.FECHA_CREACION))}
       </div>
