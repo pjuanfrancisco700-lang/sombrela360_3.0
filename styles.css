@@ -667,3 +667,56 @@ body::after{
   .nc-edit-selected-name{font-size:12.8px}
   .nc-detail-products-head span{font-size:9.2px}
 }
+
+
+/* =========================================================
+   NC · Carga visible del catálogo v3.0.18
+   Feedback inmediato mientras Apps Script prepara productos/precios.
+   ========================================================= */
+.option-card:disabled{cursor:default;opacity:.72}
+#nc-motive:disabled{opacity:.72;background:#f8fafc;color:#64748b}
+.nc-catalog-loading{
+  position:relative;
+  overflow:hidden;
+  display:grid;
+  grid-template-columns:42px 1fr;
+  gap:11px;
+  align-items:center;
+  min-height:104px;
+  padding:14px;
+  background:rgba(255,255,255,.88);
+  border:1px solid rgba(203,213,225,.72);
+  border-radius:17px;
+  box-shadow:0 5px 18px rgba(15,23,42,.035);
+}
+.nc-catalog-loading-icon{
+  width:42px;height:42px;border-radius:13px;
+  display:grid;place-items:center;
+  background:var(--blue-soft);
+  color:var(--blue);
+}
+.nc-catalog-spinner{
+  width:19px;height:19px;border-radius:50%;
+  border:2.5px solid rgba(37,99,235,.18);
+  border-top-color:var(--blue);
+  animation:spin .72s linear infinite;
+}
+.nc-catalog-loading-copy{min-width:0;display:flex;flex-direction:column;gap:3px}
+.nc-catalog-loading-copy strong{font-size:13px;color:#1e293b;font-weight:780}
+.nc-catalog-loading-copy span{font-size:10.8px;line-height:1.35;color:#7b8492}
+.nc-catalog-skeleton{
+  grid-column:1/-1;
+  display:grid;
+  grid-template-columns:1.15fr .8fr .55fr;
+  gap:7px;
+  margin-top:1px;
+}
+.nc-catalog-skeleton span{
+  display:block;height:6px;border-radius:99px;
+  background:linear-gradient(90deg,#eef2f7 20%,#f8fafc 50%,#eef2f7 80%);
+  background-size:220% 100%;
+  animation:ncCatalogShimmer 1.15s ease-in-out infinite;
+}
+.nc-catalog-skeleton span:nth-child(2){animation-delay:.08s}
+.nc-catalog-skeleton span:nth-child(3){animation-delay:.16s}
+@keyframes ncCatalogShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
