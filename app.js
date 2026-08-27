@@ -944,11 +944,11 @@ if(resetScroll){
     });
   }
   async function renderHistory(){
-    $('#page').innerHTML=`<section class="page"><div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div><div class="card"><div class="muted small">Cargando historial...</div></div></section>`;
+    $('#page').innerHTML=`<section class="page history-page"><div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div><div class="card"><div class="muted small">Cargando historial...</div></div></section>`;
     try{
       const items=await api.request('history',{}); state.history=items;
       const months=[...new Set(items.map(x=>String(x.FECHA||'').slice(0,7)).filter(Boolean))].sort().reverse();
-      $('#page').innerHTML=`<section class="page">
+      $('#page').innerHTML=`<section class="page history-page">
         <div class="page-head"><div><h2>Historial</h2><p>Ventas y notas de crédito registradas.</p></div><div class="page-head-actions"><button class="icon-btn" data-action="refresh" aria-label="Actualizar" title="Actualizar">${icon('refresh',20)}</button><button class="icon-btn" data-action="back-sales" aria-label="Volver">${icon('back',21)}</button></div></div>
         <div class="search" style="margin-bottom:9px"><span>${icon('search',18)}</span><input id="history-search" value="${esc(state.historySearch)}" placeholder="Buscar en historial..."></div>
         <div class="filter-row">
@@ -978,8 +978,10 @@ if(resetScroll){
         </div>
       </div>
       <div class="history-title">${esc(x.CLIENTE||'Cliente')}</div>
-      ${meta?`<div class="history-meta">${esc(meta)}</div>`:''}
-      ${tag?`<div class="history-tags"><span class="history-tag ${sale?'sale':'nc'}">${esc(tag)}</span></div>`:''}
+      ${(meta||tag)?`<div class="history-info-row">
+        ${meta?`<div class="history-meta">${esc(meta)}</div>`:''}
+        ${tag?`<span class="history-tag ${sale?'sale':'nc'}">${esc(tag)}</span>`:''}
+      </div>`:''}
       ${!sale&&x.MOTIVO?`<div class="history-reason"><span>Motivo</span><strong>${esc(x.MOTIVO)}</strong></div>`:''}
       <div class="history-actions">
         <button data-action="history-view" data-kind="${x.kind}" data-id="${sale?x.ID_VENTA:x.ID_NC}">Ver</button>
