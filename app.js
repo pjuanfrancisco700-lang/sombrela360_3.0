@@ -1268,7 +1268,7 @@ if(resetScroll){
           <p>La idea surgió al observar que varios integrantes del equipo de ventas llevaban sus registros en blocs de notas y apuntes que podían perderse o volverse difíciles de controlar.</p>
           <p>A partir de esa necesidad nació una solución más práctica, ordenada y accesible desde el teléfono.</p>
           <p>Esta es una herramienta creada desde la experiencia en campo, pensada para simplificar el seguimiento diario y tener siempre una visión clara de las ventas mensuales.</p>
-          <div class="signature">Armado por Sergio Pascual</div>
+          <div class="signature">Ideado y armado por Sergio Pascual y Darwin Gómez</div>
         </div>
       </article>
     </section>`;
