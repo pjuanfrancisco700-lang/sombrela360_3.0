@@ -1059,10 +1059,42 @@ if(resetScroll){
     });
     return out;
   }
+  let ncCatalogLoading=false;
+  let ncCatalogRequestId=0;
+
+  function renderNcCatalogLoading(){
+    return `<div class="nc-catalog-loading" role="status" aria-live="polite" aria-busy="true">
+      <div class="nc-catalog-loading-icon"><span class="nc-catalog-spinner" aria-hidden="true"></span></div>
+      <div class="nc-catalog-loading-copy">
+        <strong>Cargando catálogo...</strong>
+        <span>Preparando productos y precios de ${esc(state.ncDraft.channel||'este canal')}.</span>
+      </div>
+      <div class="nc-catalog-skeleton" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+    </div>`;
+  }
+
   async function loadNcCatalog(){
     if(!state.ncDraft.channel) return;
-    try{ state.ncDraft.catalog=await api.request('getNcCatalog',{channel:state.ncDraft.channel}); renderNC(); }
-    catch(err){toast(err.message,'error');}
+
+    const channel=String(state.ncDraft.channel);
+    const requestId=++ncCatalogRequestId;
+    ncCatalogLoading=true;
+    renderNC();
+
+    try{
+      const catalog=await api.request('getNcCatalog',{channel});
+      if(requestId!==ncCatalogRequestId||String(state.ncDraft.channel)!==channel) return;
+      state.ncDraft.catalog=Array.isArray(catalog)?catalog:[];
+    }catch(err){
+      if(requestId===ncCatalogRequestId) toast(err.message,'error');
+    }finally{
+      if(requestId===ncCatalogRequestId){
+        ncCatalogLoading=false;
+        renderNC();
+      }
+    }
   }
   function renderNC(){
     const draft=state.ncDraft, motive=currentMotive();
@@ -1080,15 +1112,15 @@ if(resetScroll){
       <div class="stepper"><span class="on"></span><span class="${draft.channel?'on':''}"></span><span class="${ready?'on':''}"></span></div>
       <div class="section-title"><h3>1. Selecciona el canal</h3></div>
       <div class="option-grid">
-        ${(state.data.channels||[]).map(c=>`<button class="option-card ${draft.channel===c.NOMBRE_CANAL?'active':''}" data-action="nc-channel" data-channel="${esc(c.NOMBRE_CANAL)}"><div class="option-title">${esc(c.NOMBRE_CANAL)}</div><div class="option-sub">Precios correspondientes al canal</div></button>`).join('')}
+        ${(state.data.channels||[]).map(c=>`<button class="option-card ${draft.channel===c.NOMBRE_CANAL?'active':''}" data-action="nc-channel" data-channel="${esc(c.NOMBRE_CANAL)}" ${ncCatalogLoading?'disabled aria-disabled="true"':''}><div class="option-title">${esc(c.NOMBRE_CANAL)}</div><div class="option-sub">Precios correspondientes al canal</div></button>`).join('')}
       </div>
-      ${draft.channel?`<div class="section-title"><h3>2. Motivo</h3></div><div class="field" style="margin-bottom:10px"><select id="nc-motive"><option value="">Selecciona un motivo</option>${motives.map(m=>`<option value="${esc(m.ID_MOTIVO)}" ${draft.motiveId===m.ID_MOTIVO?'selected':''}>${esc(m.MOTIVO)} · ${Math.round(Number(m.PORCENTAJE_APLICACION)*100)}%</option>`).join('')}</select></div>`:''}
-      ${ready?`${draft.editId?`<div class="section-title"><h3>3. Productos seleccionados</h3><span class="small muted">${totals.units} unidades</span></div>
+      ${draft.channel?`<div class="section-title"><h3>2. Motivo</h3></div><div class="field" style="margin-bottom:10px"><select id="nc-motive" ${ncCatalogLoading?'disabled aria-busy="true"':''}><option value="">Selecciona un motivo</option>${motives.map(m=>`<option value="${esc(m.ID_MOTIVO)}" ${draft.motiveId===m.ID_MOTIVO?'selected':''}>${esc(m.MOTIVO)} · ${Math.round(Number(m.PORCENTAJE_APLICACION)*100)}%</option>`).join('')}</select></div>`:''}
+      ${ready?(ncCatalogLoading?`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Cargando catálogo</span></div>${renderNcCatalogLoading()}`:`${draft.editId?`<div class="section-title"><h3>3. Productos seleccionados</h3><span class="small muted">${totals.units} unidades</span></div>
         ${renderNcSelectedEditor(totals.items)}
         <div class="section-title nc-add-more-title"><h3>Agregar más productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`:`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`}
         <div class="search" style="margin-bottom:10px"><span>${icon('search',18)}</span><input id="product-search" placeholder="Buscar producto, código o precio..."></div>
         <div id="product-list" class="product-list">${renderProductCards(draft.editId?draft.catalog.filter(p=>!Number(draft.items[p.ID_PRODUCTO]||0)):draft.catalog, draft.editId)}</div>
-        ${totals.units?`<div class="cart-bar"><div><div class="tiny" style="opacity:.7">${totals.units} unidades</div><strong>${money(totals.total)}</strong></div><button data-action="open-nc-summary">Ver resumen ${icon('chevron',17)}</button></div>`:''}`:''}
+        ${totals.units?`<div class="cart-bar"><div><div class="tiny" style="opacity:.7">${totals.units} unidades</div><strong>${money(totals.total)}</strong></div><button data-action="open-nc-summary">Ver resumen ${icon('chevron',17)}</button></div>`:''}`):''}
     </section>`;
   }
   function renderProductCards(products,editing=false){
