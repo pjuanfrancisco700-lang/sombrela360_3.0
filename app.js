@@ -55,6 +55,19 @@
     }
     return `VEN-${raw.replace(/[^a-zA-Z0-9]/g,'').toUpperCase()}`;
   };
+  const ncOperationId = () => {
+    let raw = '';
+    if(window.crypto && typeof window.crypto.randomUUID === 'function'){
+      raw = window.crypto.randomUUID();
+    }else if(window.crypto && typeof window.crypto.getRandomValues === 'function'){
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      raw = [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+    }else{
+      raw = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    }
+    return `NC-${raw.replace(/[^a-zA-Z0-9]/g,'').toUpperCase()}`;
+  };
   const dateLabel = iso => {
     if(!iso) return '';
     const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);
@@ -155,7 +168,7 @@
     historySearch:'',
     historyType:'TODOS',
     historyMonth:'TODOS',
-    ncDraft:{channel:'',motiveId:'',items:{},catalog:[],editId:null},
+    ncDraft:{channel:'',motiveId:'',items:{},catalog:[],editId:null,clientId:'',operationId:''},
     budgetDates:new Set(),
     newPeriodDates:new Set(),
     appliedSaleIds:new Set(),
@@ -577,12 +590,27 @@
     }).filter(Boolean);
     if(!items.length) throw new Error('Agrega al menos un producto');
     const subtotal=items.reduce((a,x)=>a+x.SUBTOTAL,0), percentage=Number(motive.PORCENTAJE_APLICACION), total=subtotal*percentage;
-    let n;
-    if(isEdit){ n=demo.nc.find(x=>x.ID_NC===p.ncId&&x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO'); if(!n) throw new Error('NC no encontrada'); demo.detalleNC=demo.detalleNC.filter(d=>d.ID_NC!==n.ID_NC); }
-    else { n={ID_NC:uid('NC'),ID_PERIODO:period.ID_PERIODO,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ESTADO:'ACTIVO'}; demo.nc.push(n); }
+    let n, duplicate=false;
+    if(isEdit){
+      n=demo.nc.find(x=>x.ID_NC===p.ncId&&x.RUTA===u.RUTA&&x.ESTADO==='ACTIVO');
+      if(!n) throw new Error('NC no encontrada');
+      demo.detalleNC=demo.detalleNC.filter(d=>d.ID_NC!==n.ID_NC);
+    }else{
+      const requestedId=String(p.ncId||'').trim()||uid('NC');
+      n=demo.nc.find(x=>x.ID_NC===requestedId&&x.RUTA===u.RUTA);
+      if(n){
+        duplicate=true;
+      }else{
+        n={ID_NC:requestedId,ID_PERIODO:period.ID_PERIODO,ID_USUARIO:u.ID_USUARIO,RUTA:u.RUTA,ESTADO:'ACTIVO'};
+        demo.nc.push(n);
+      }
+      if(duplicate){
+        return {nc:n,dashboard:dashboardFor(u),duplicate:true};
+      }
+    }
     Object.assign(n,{ID_CLIENTE:client.ID_CLIENTE,CANAL:p.channel,MOTIVO:motive.MOTIVO,SUBTOTAL:subtotal,PORCENTAJE:percentage,TOTAL_NC:total,FECHA:n.FECHA||todayISO(),HORA:n.HORA||nowTime()});
     items.forEach(x=>demo.detalleNC.push({ID_DETALLE:uid('DNC'),ID_NC:n.ID_NC,...x}));
-    return {nc:n,dashboard:dashboardFor(u)};
+    return {nc:n,dashboard:dashboardFor(u),duplicate};
   }
 
   function demoUpdatePeriod(p,isNew){
@@ -1002,6 +1030,35 @@ if(resetScroll){
     const items=ncItemsArray(); const subtotal=items.reduce((a,x)=>a+Number(x.PRECIO||0)*x.quantity,0); const rate=Number(currentMotive()?.PORCENTAJE_APLICACION||0);
     return {items,subtotal,rate,total:subtotal*rate,units:items.reduce((a,x)=>a+x.quantity,0)};
   }
+  function renderNcSelectedEditor(items){
+    if(!items.length){
+      return `<div class="nc-edit-empty">No hay productos seleccionados en esta nota de crédito.</div>`;
+    }
+    return `<div class="nc-edit-selected">${items.map(x=>`<div class="nc-edit-selected-row">
+      <div class="nc-edit-selected-main">
+        <div class="nc-edit-selected-name">${esc(x.PRODUCTO)}</div>
+        <div class="nc-edit-selected-meta">${money(x.PRECIO)} c/u · ${money(x.PRECIO*x.quantity)}</div>
+        <button class="btn-link tiny" data-action="nc-remove-selected" data-product="${esc(x.ID_PRODUCTO)}">Quitar</button>
+      </div>
+      <div class="qty-pill"><button data-action="nc-qty" data-product="${esc(x.ID_PRODUCTO)}" data-delta="-1">−</button><span>${x.quantity}</span><button data-action="nc-qty" data-product="${esc(x.ID_PRODUCTO)}" data-delta="1">+</button></div>
+    </div>`).join('')}</div>`;
+  }
+
+  function hydrateNcItems(detailItems,catalog){
+    const byId=new Map((catalog||[]).map(p=>[String(p.ID_PRODUCTO),p]));
+    const byName=new Map((catalog||[]).map(p=>[normalize(p.PRODUCTO),p]));
+    const out={};
+    (detailItems||[]).forEach(item=>{
+      let id=String(item.ID_PRODUCTO||'').trim();
+      if(!byId.has(id)){
+        const match=byName.get(normalize(item.PRODUCTO));
+        if(match) id=String(match.ID_PRODUCTO);
+      }
+      const qty=Math.max(0,Math.floor(Number(item.CANTIDAD||item.quantity||0)));
+      if(id&&byId.has(id)&&qty>0) out[id]=qty;
+    });
+    return out;
+  }
   async function loadNcCatalog(){
     if(!state.ncDraft.channel) return;
     try{ state.ncDraft.catalog=await api.request('getNcCatalog',{channel:state.ncDraft.channel}); renderNC(); }
@@ -1026,14 +1083,16 @@ if(resetScroll){
         ${(state.data.channels||[]).map(c=>`<button class="option-card ${draft.channel===c.NOMBRE_CANAL?'active':''}" data-action="nc-channel" data-channel="${esc(c.NOMBRE_CANAL)}"><div class="option-title">${esc(c.NOMBRE_CANAL)}</div><div class="option-sub">Precios correspondientes al canal</div></button>`).join('')}
       </div>
       ${draft.channel?`<div class="section-title"><h3>2. Motivo</h3></div><div class="field" style="margin-bottom:10px"><select id="nc-motive"><option value="">Selecciona un motivo</option>${motives.map(m=>`<option value="${esc(m.ID_MOTIVO)}" ${draft.motiveId===m.ID_MOTIVO?'selected':''}>${esc(m.MOTIVO)} · ${Math.round(Number(m.PORCENTAJE_APLICACION)*100)}%</option>`).join('')}</select></div>`:''}
-      ${ready?`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>
+      ${ready?`${draft.editId?`<div class="section-title"><h3>3. Productos seleccionados</h3><span class="small muted">${totals.units} unidades</span></div>
+        ${renderNcSelectedEditor(totals.items)}
+        <div class="section-title nc-add-more-title"><h3>Agregar más productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`:`<div class="section-title"><h3>3. Productos</h3><span class="small muted">Aplicación ${Math.round(Number(motive.PORCENTAJE_APLICACION)*100)}%</span></div>`}
         <div class="search" style="margin-bottom:10px"><span>${icon('search',18)}</span><input id="product-search" placeholder="Buscar producto, código o precio..."></div>
-        <div id="product-list" class="product-list">${renderProductCards(draft.catalog)}</div>
+        <div id="product-list" class="product-list">${renderProductCards(draft.editId?draft.catalog.filter(p=>!Number(draft.items[p.ID_PRODUCTO]||0)):draft.catalog, draft.editId)}</div>
         ${totals.units?`<div class="cart-bar"><div><div class="tiny" style="opacity:.7">${totals.units} unidades</div><strong>${money(totals.total)}</strong></div><button data-action="open-nc-summary">Ver resumen ${icon('chevron',17)}</button></div>`:''}`:''}
     </section>`;
   }
-  function renderProductCards(products){
-    if(!products?.length) return `<div class="empty-state"><div class="empty-icon">${icon('box',22)}</div><h3>Sin productos</h3><p>Agrega productos y precios activos en Google Sheets.</p></div>`;
+  function renderProductCards(products,editing=false){
+    if(!products?.length) return `<div class="empty-state"><div class="empty-icon">${icon('box',22)}</div><h3>${editing?'Sin productos por agregar':'Sin productos'}</h3><p>${editing?'Los productos seleccionados ya están arriba.':'Agrega productos y precios activos en Google Sheets.'}</p></div>`;
     return products.map(p=>{
       const q=Number(state.ncDraft.items[p.ID_PRODUCTO]||0);
       return `<article class="product-card" data-search="${esc(normalize(`${p.PRODUCTO} ${p.CODIGO} ${p.REFERENCIAS_BUSQUEDA} ${p.PRECIO}`))}">
@@ -1052,8 +1111,8 @@ if(resetScroll){
         <div class="summary-line"><span class="muted">Aplicación</span><strong>${Math.round(t.rate*100)}%</strong></div>
         <div class="summary-line summary-total"><span>Total NC</span><span>${money(t.total)}</span></div>
       </div>
-      <div class="field"><label>Cliente con congelador</label><select id="nc-client"><option value="">Selecciona un cliente</option>${freezerClients.map(c=>`<option value="${esc(c.ID_CLIENTE)}">${esc(c.NOMBRE_NEGOCIO)} · ${esc(c.DIRECCION||'')}</option>`).join('')}</select></div>
-      <div class="form-actions"><button class="btn btn-secondary" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" data-action="save-nc">${state.ncDraft.editId?'GUARDAR CAMBIOS':'GUARDAR NC'}</button></div>
+      <div class="field"><label>Cliente con congelador</label><select id="nc-client"><option value="">Selecciona un cliente</option>${freezerClients.map(c=>`<option value="${esc(c.ID_CLIENTE)}" ${String(state.ncDraft.clientId||'')===String(c.ID_CLIENTE)?'selected':''}>${esc(c.NOMBRE_NEGOCIO)} · ${esc(c.DIRECCION||'')}</option>`).join('')}</select></div>
+      <div class="form-actions"><button class="btn btn-secondary" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" data-action="save-nc" id="save-nc-btn">${state.ncDraft.editId?'GUARDAR CAMBIOS':'GUARDAR NC'}</button></div>
     `);
   }
 
@@ -1304,9 +1363,10 @@ function closeModal(){
       if(a==='nc-qty-modal') openNcSummary(); else renderNC(); return;
     }
     if(a==='nc-remove'){delete state.ncDraft.items[el.dataset.product];openNcSummary();return;}
+    if(a==='nc-remove-selected'){delete state.ncDraft.items[el.dataset.product];renderNC();return;}
     if(a==='open-nc-summary'){openNcSummary();return;}
     if(a==='save-nc'){await saveNCFromModal();return;}
-    if(a==='reset-nc'){state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null};renderNC();return;}
+    if(a==='reset-nc'){state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null,clientId:'',operationId:''};renderNC();return;}
     if(a==='logout'){confirmModal('Cerrar sesión','¿Deseas salir de Sombrela 360?','CERRAR SESIÓN','confirm-logout');return;}
     if(a==='confirm-logout'){
       const token=state.session?.token||'';
@@ -1350,10 +1410,48 @@ function closeModal(){
     if(a==='edit-client'){const c=state.data.clients.find(x=>x.ID_CLIENTE===el.dataset.client);if(c)openCreateClient(c);return;}
     if(a==='ask-deactivate-client'){confirmModal('Desactivar cliente','El historial del cliente se conservará. Solo dejará de aparecer como activo.','DESACTIVAR','deactivate-client',`data-client="${esc(el.dataset.client)}"`);return;}
     if(a==='deactivate-client'){await deactivateClient(el.dataset.client);return;}
-    if(a==='history-view'){await historyView(el.dataset.kind,el.dataset.id);return;}
-    if(a==='history-edit'){await historyEdit(el.dataset.kind,el.dataset.id);return;}
-    if(a==='history-delete'){confirmModal('Eliminar registro','La operación se anulará para conservar trazabilidad histórica.','ELIMINAR','confirm-history-delete',`data-kind="${esc(el.dataset.kind)}" data-id="${esc(el.dataset.id)}"`);return;}
-    if(a==='confirm-history-delete'){await historyDelete(el.dataset.kind,el.dataset.id);return;}
+    if(a==='history-view'){await runHistoryAction(el,()=>historyView(el.dataset.kind,el.dataset.id));return;}
+    if(a==='history-edit'){await runHistoryAction(el,()=>historyEdit(el.dataset.kind,el.dataset.id));return;}
+    if(a==='history-delete'){await runHistoryAction(el,()=>confirmModal('Eliminar registro','La operación se anulará para conservar trazabilidad histórica.','ELIMINAR','confirm-history-delete',`data-kind="${esc(el.dataset.kind)}" data-id="${esc(el.dataset.id)}"`));return;}
+    if(a==='confirm-history-delete'){await runModalAction(el,'ELIMINANDO...',()=>historyDelete(el.dataset.kind,el.dataset.id));return;}
+  }
+
+  async function runModalAction(trigger,busyText,task){
+    if(!trigger||trigger.dataset.busy==='1'||trigger.disabled) return;
+    trigger.dataset.busy='1';
+    trigger.dataset.originalText=trigger.textContent;
+    trigger.disabled=true;
+    trigger.setAttribute('aria-busy','true');
+    if(busyText) trigger.textContent=busyText;
+    try{
+      return await task();
+    }finally{
+      if(trigger.isConnected){
+        trigger.disabled=false;
+        trigger.removeAttribute('aria-busy');
+        trigger.textContent=trigger.dataset.originalText||trigger.textContent;
+        delete trigger.dataset.originalText;
+        delete trigger.dataset.busy;
+      }
+    }
+  }
+
+  let historyActionBusy=false;
+  async function runHistoryAction(trigger,task){
+    if(historyActionBusy||!trigger||trigger.disabled) return;
+    historyActionBusy=true;
+    const card=trigger.closest('.history-card');
+    const buttons=card?[...card.querySelectorAll('.history-actions button')]:[trigger];
+    buttons.forEach(btn=>{btn.disabled=true;btn.setAttribute('aria-busy','true');btn.classList.add('is-busy');});
+    const started=Date.now();
+    try{
+      return await task();
+    }finally{
+      const wait=Math.max(0,350-(Date.now()-started));
+      if(wait) await new Promise(resolve=>setTimeout(resolve,wait));
+      buttons.forEach(btn=>{if(btn.isConnected){btn.disabled=false;btn.removeAttribute('aria-busy');btn.classList.remove('is-busy');}});
+      historyActionBusy=false;
+    }
   }
 
   function handleInput(e){
@@ -1368,8 +1466,10 @@ function closeModal(){
     if(e.target.id==='history-type'){state.historyType=e.target.value;refreshHistory();}
     if(e.target.id==='history-month'){state.historyMonth=e.target.value;refreshHistory();}
     if(e.target.id==='nc-motive'){
-      state.ncDraft.motiveId=e.target.value; state.ncDraft.items={}; if(state.ncDraft.motiveId&&!state.ncDraft.catalog.length)await loadNcCatalog(); else renderNC();
+      state.ncDraft.motiveId=e.target.value;
+      if(state.ncDraft.motiveId&&!state.ncDraft.catalog.length) await loadNcCatalog(); else renderNC();
     }
+    if(e.target.id==='nc-client') state.ncDraft.clientId=e.target.value;
     if(e.target.id==='new-period-month'||e.target.id==='new-period-year'){state.newPeriodDates=new Set();rerenderNewPeriodCalendar();}
   }
 
@@ -1481,12 +1581,69 @@ function closeModal(){
     }
   }
 
+  let ncSavePromise=null;
+  function setNcSummaryBusy(busy){
+    const modal=$('.modal');
+    if(!modal) return;
+    const controls=[...modal.querySelectorAll('button,select')];
+    controls.forEach(control=>{
+      if(busy){
+        control.dataset.ncWasDisabled=control.disabled?'1':'0';
+        control.disabled=true;
+      }else if(control.dataset.ncWasDisabled!==undefined){
+        control.disabled=control.dataset.ncWasDisabled==='1';
+        delete control.dataset.ncWasDisabled;
+      }
+    });
+    const btn=$('#save-nc-btn');
+    if(btn){
+      if(busy){
+        btn.dataset.originalText=btn.textContent;
+        btn.textContent='GUARDANDO...';
+        btn.setAttribute('aria-busy','true');
+      }else{
+        btn.textContent=btn.dataset.originalText|| (state.ncDraft.editId?'GUARDAR CAMBIOS':'GUARDAR NC');
+        delete btn.dataset.originalText;
+        btn.removeAttribute('aria-busy');
+      }
+    }
+  }
   async function saveNCFromModal(){
-    const clientId=$('#nc-client')?.value; if(!clientId)return toast('Selecciona un cliente','error'); const t=ncTotals();
-    try{
-      const payload={ncId:state.ncDraft.editId,clientId,channel:state.ncDraft.channel,motiveId:state.ncDraft.motiveId,items:t.items.map(x=>({productId:x.ID_PRODUCTO,quantity:x.quantity}))};
-      const res=await api.request(state.ncDraft.editId?'updateNC':'saveNC',payload); state.data.dashboard=res.dashboard; state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null};closeModal();toast('Nota de crédito guardada','success');renderNC();
-    }catch(err){toast(err.message,'error');}
+    if(ncSavePromise) return ncSavePromise;
+    const clientId=$('#nc-client')?.value;
+    if(!clientId) return toast('Selecciona un cliente','error');
+    const t=ncTotals();
+    if(!t.items.length) return toast('Agrega al menos un producto','error');
+
+    state.ncDraft.clientId=clientId;
+    if(!state.ncDraft.editId&&!state.ncDraft.operationId) state.ncDraft.operationId=ncOperationId();
+    const payload={
+      ncId:state.ncDraft.editId||state.ncDraft.operationId,
+      clientId,
+      channel:state.ncDraft.channel,
+      motiveId:state.ncDraft.motiveId,
+      items:t.items.map(x=>({productId:x.ID_PRODUCTO,quantity:x.quantity}))
+    };
+
+    setNcSummaryBusy(true);
+    ncSavePromise=(async()=>{
+      try{
+        const res=await api.request(state.ncDraft.editId?'updateNC':'saveNC',payload);
+        state.data.dashboard=res.dashboard;
+        state.ncDraft={channel:'',motiveId:'',items:{},catalog:[],editId:null,clientId:'',operationId:''};
+        closeModal();
+        toast(res?.duplicate?'Nota de crédito ya registrada':'Nota de crédito guardada','success');
+        renderNC();
+        return res;
+      }catch(err){
+        toast(err.message,'error');
+        throw err;
+      }finally{
+        if($('#modal-root')?.children.length) setNcSummaryBusy(false);
+      }
+    })().finally(()=>{ncSavePromise=null;});
+
+    try{return await ncSavePromise;}catch{return null;}
   }
   async function deactivateClient(id){
     try{await api.request('deactivateClient',{clientId:id});state.data.clients=state.data.clients.filter(c=>c.ID_CLIENTE!==id);closeModal();toast('Cliente desactivado','success');renderClientBase();}catch(err){toast(err.message,'error');}
@@ -1499,15 +1656,27 @@ function closeModal(){
     try{
       const n=await api.request('getNCDetail',{ncId:id});
       const ncMeta=[dateLabel(n.FECHA||x.FECHA),timeLabel(n.HORA||x.HORA)].filter(Boolean).join(' · ');
-      openModal('Detalle de NC',esc(x.CLIENTE||''),`${ncMeta?`<div class="history-detail-date">${esc(ncMeta)}</div>`:''}<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div><div style="margin:10px 0">${(n.items||[]).map(i=>`<div class="cart-item"><div><div class="cart-item-title">${esc(i.PRODUCTO)}</div><div class="cart-item-price">${money(i.PRECIO_UNITARIO)} × ${i.CANTIDAD}</div></div><strong>${money(i.SUBTOTAL)}</strong></div>`).join('')}</div><div class="summary-line"><span>Subtotal productos</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);
+      const detailItems=Array.isArray(n.items)?n.items:[];
+      const totalUnits=detailItems.reduce((sum,i)=>sum+Number(i.CANTIDAD||0),0);
+      const productDetail=detailItems.length?`<div class="nc-detail-products">
+        <div class="nc-detail-products-head"><strong>Productos</strong><span>${detailItems.length} ${detailItems.length===1?'producto':'productos'} · ${totalUnits} ${totalUnits===1?'unidad':'unidades'}</span></div>
+        ${detailItems.map(i=>`<div class="nc-detail-product-row"><div><div class="nc-detail-product-name">${esc(i.PRODUCTO||'Producto')}</div><div class="nc-detail-product-meta">${money(i.PRECIO_UNITARIO)} × ${Number(i.CANTIDAD||0)}</div></div><strong>${money(i.SUBTOTAL)}</strong></div>`).join('')}
+      </div>`:`<div class="nc-detail-empty">Este registro no tiene detalle de productos almacenado.</div>`;
+      openModal('Detalle de NC',esc(x.CLIENTE||''),`${ncMeta?`<div class="history-detail-date">${esc(ncMeta)}</div>`:''}<div class="summary-line"><span>Canal</span><strong>${esc(n.CANAL)}</strong></div><div class="summary-line"><span>Motivo</span><strong>${esc(n.MOTIVO)}</strong></div>${productDetail}<div class="summary-line"><span>Subtotal productos</span><strong>${money(n.SUBTOTAL)}</strong></div><div class="summary-line"><span>Aplicación</span><strong>${Math.round(Number(n.PORCENTAJE)*100)}%</strong></div><div class="summary-line summary-total"><span>Total NC</span><span>${money(n.TOTAL_NC)}</span></div>`);
     }catch(err){toast(err.message,'error');}
   }
   async function historyEdit(kind,id){
     const x=(state.history||[]).find(i=>(kind==='VENTA'?i.ID_VENTA:i.ID_NC)===id);if(!x)return;
     if(kind==='VENTA'){openModal('Editar venta',esc(x.CLIENTE||''),`<form id="edit-sale-form"><input type="hidden" name="saleId" value="${esc(id)}"><div class="field"><label>Monto</label><input name="amount" type="number" min="0.01" step="0.01" value="${Number(x.MONTO||0)}" required></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-action="close-modal">CANCELAR</button><button class="btn btn-primary" type="submit">GUARDAR</button></div></form>`);return;}
     try{
-      const n=await api.request('getNCDetail',{ncId:id}); const motive=(state.data.motives||[]).find(m=>m.CANAL===n.CANAL&&m.MOTIVO===n.MOTIVO); const catalog=await api.request('getNcCatalog',{channel:n.CANAL});
-      const items={};(n.items||[]).forEach(i=>items[i.ID_PRODUCTO]=Number(i.CANTIDAD));state.ncDraft={channel:n.CANAL,motiveId:motive?.ID_MOTIVO||'',items,catalog,editId:n.ID_NC};closeModal();navigate('nc');
+      const n=await api.request('getNCDetail',{ncId:id});
+      const motive=(state.data.motives||[]).find(m=>m.CANAL===n.CANAL&&m.MOTIVO===n.MOTIVO);
+      const catalog=await api.request('getNcCatalog',{channel:n.CANAL});
+      const items=hydrateNcItems(n.items||[],catalog);
+      state.ncDraft={channel:n.CANAL,motiveId:motive?.ID_MOTIVO||'',items,catalog,editId:n.ID_NC,clientId:n.ID_CLIENTE||'',operationId:''};
+      closeModal();
+      navigate('nc');
+      if(!(n.items||[]).length) toast('Esta NC no tiene detalle de productos almacenado','error');
     }catch(err){toast(err.message,'error');}
   }
   async function historyDelete(kind,id){
